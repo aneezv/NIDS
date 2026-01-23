@@ -1,0 +1,13 @@
+{
+    "API_KEY": "secure-research-demo-key-123",
+    "TRUST_THRESHOLD": 50,
+    "BLOCK_THRESHOLD": 35,  
+    "WHITELIST": [
+        "127.0.0.1",
+        "192.168.1.8",
+        "192.168.1.1",
+        "8.8.8.8",
+        "10.0.0.50"
+    ],
+    "HISTORY_TTL_SECONDS": 3600
+}
