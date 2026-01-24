@@ -3,19 +3,29 @@ import requests
 import time
 import os
 import urllib3
+import json
 from features import parse_tshark_line
 from detector import AnomalyDetector
 
 # --- CONFIGURATION ---
-CONTROLLER_URL = "https://192.168.16.42:5000/alert"
-API_KEY = "secure-research-demo-key-123"
-INTERFACE = "eth0"
-BATCH_SIZE = 10 
-SENSOR_ID = "sensor_victim_01"
-CERT_PATH = "cert.pem" # Path to the certificate copied from controller
+with open("config.json") as config :
+    data = json.load(config)
+    
+CONTROLLER_URL = data.get("controller_url")
+API_KEY = data.get("api_key")
+INTERFACE = data.get("interface")
+BATCH_SIZE = data.get("batch_size")
+SENSOR_ID = data.get("sensor_id")
+MODEL_PATH = data.get("model_path")
+THRESHOLD = data.get("threshold")
+WHITELIST = data.get("whitelist", ["127.0.0.1"])
+CERT_PATH = data.get("cert_path", "cert.pem") # Path to the certificate copied from controller
 
 # --- INITIALIZATION ---
-detector = AnomalyDetector("model.pkl")
+detector = AnomalyDetector(
+    model_path = MODEL_PATH,
+    threshold = THRESHOLD
+)
 last_alert_time = {} 
 
 # Silence SSL Warnings only if we are forced to use verify=False
@@ -79,7 +89,7 @@ def monitor_traffic():
                 continue
 
             # Whitelist Self/Router to avoid feedback loops
-            if src_ip in ["127.0.0.1", "192.168.1.8", "10.0.0.50"]: 
+            if src_ip in WHITELIST: 
                 continue
 
             batch_data.append(features)
