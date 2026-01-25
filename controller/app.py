@@ -1,20 +1,20 @@
 import logging
 import threading
 import json
+import os
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from verification import VerificationEngine
 
+load_dotenv
+
 # --- CONFIGURATION ---
-try:
-    with open('config.json') as f:
-        CONFIG = json.load(f)
-except FileNotFoundError:
-    # Use defaults if config missing (for testing)
-    CONFIG = {
-        "API_KEY": "secure-research-demo-key-123",
-        "BLOCK_THRESHOLD": 100,
-        "WHITELIST": ["127.0.0.1"]
-    }
+
+with open('config.json') as f:
+    CONFIG = json.load(f)
+    
+if os.getenv("API_KEY"):
+    CONFIG["API_KEY"] = os.getenv("API_KEY")    
 
 app = Flask(__name__)
 
