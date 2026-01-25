@@ -1,0 +1,15 @@
+{
+    "sensor_id": "sensor_victim_01",
+    "controller_url": "https://192.168.16.42:5000/alert",
+    "api_key": "secure-research-demo-key-123",
+    "interface": "eth0",
+    "threshold": 0.10,
+    "model_path": "model.pkl",
+    "batch_size": 10,
+    "whitelist": [
+        "127.0.0.1",
+        "192.168.1.8",
+        "10.0.0.50"
+    ],
+    "cert_path": "cert.pem"
+}

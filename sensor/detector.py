@@ -1,11 +1,15 @@
 import joblib
 import pandas as pd
+import os
+import datetime
 
 class AnomalyDetector:
-    def __init__(self, model_path="model.pkl"):
-        print(f"🧠 Loading Model from {model_path}...")
+    def __init__(self, model_path="model.pkl", threshold=0.10):
+        print(f"🧠 Loading Model from {model_path} (Threshold: {threshold})...")
         self.model = joblib.load(model_path)
+        self.model_path = model_path
         self.feature_cols = ['frame.len', 'port', 'ip.proto', 'tcp.flags']
+        self.threshold = threshold
 
     def normalize_score(self, anomaly_score):
         """
@@ -16,15 +20,35 @@ class AnomalyDetector:
         # Typically < 0 is anomaly, > 0 is normal.
         # User's logic: if score > 0.10 return 0 (Normal)
         # Else: min((0.10 - score) * 2000, 100)
-        if anomaly_score > 0.10: 
+        if anomaly_score > self.threshold: 
             return 0.0
-        return min((0.10 - anomaly_score) * 2000, 100)
+        return min((self.threshold - anomaly_score) * 2000, 100)
+
+    def get_model_metadata(self):
+        """
+        Returns info about the current model for the UI.
+        """
+        try:
+            mod_time = os.path.getmtime(self.model_path)
+            date_str = datetime.datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M')
+
+        except :
+            date_str = "Unknown"
+
+        return {
+            "version" : "1.0",
+            "last_trained" : date_str,
+            "threshold" : self.threshold
+        }
 
     def predict_batch(self, batch_features):
         """
         batch_features: List of lists [frame_len, port, proto, flags]
         Returns: List of (raw_score, normalized_confidence)
         """
+        if not batch_features:
+            return []
+
         df = pd.DataFrame(batch_features, columns=self.feature_cols)
         raw_scores = self.model.decision_function(df)
         
