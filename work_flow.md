@@ -12,7 +12,8 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 (Foundational – BLOCKER for all development)
 
 **Owner: Jisto**
-- [ ] Finalize project folder structure (sensor / controller / ui)
+
+- [x] Finalize project folder structure (sensor / controller / ui)
 - [x] Setup Git repository and branching strategy
 - [x] Define configuration format (.env, config files)
 - [ ] Define alert & heartbeat JSON schema
@@ -30,9 +31,9 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Sensor Reliability
 **Owner: Neha**
-- [ ] Implement heartbeat thread (every 30s)
-- [ ] Queue alerts locally if controller is unreachable
-- [ ] Attach `sensor_id` to all outgoing messages
+- [x] Implement heartbeat thread (every 30s)
+- [] Queue alerts locally if controller is unreachable
+- [] Attach `sensor_id` to all outgoing messages
 
 ---
 
@@ -43,14 +44,14 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 **Owner: Jisto**
 - [ ] Implement API authentication (API keys or mTLS)
 - [x] Move secrets from config files to `.env`
-- [ ] Enforce SSL-only communication (no HTTP fallback)
-- [ ] Validate all incoming sensor payloads
+- [x] Enforce SSL-only communication (no HTTP fallback)
+- [] Validate all incoming sensor payloads
 
 ### Core Controller Endpoints
 **Owner: Jisto**
-- [ ] POST `/alert`
-- [ ] POST `/heartbeat`
-- [ ] POST `/config` (admin-only)
+- [x] POST `/alert`
+- [x] POST `/heartbeat`
+- [x] POST `/config` (admin-only)
 
 ---
 
