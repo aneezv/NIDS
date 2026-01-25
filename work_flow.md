@@ -4,6 +4,8 @@ This timeline defines the execution order of tasks for the Network Immune Defens
 Each task explicitly lists the **responsible team member** to ensure accountability and clarity.
 Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
+**type x in between - [ ] to check mark your work completetion ( -[x] )**
+
 ---
 
 ## Phase 0: Environment & Repository Setup (Week 0)
@@ -22,9 +24,9 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Sensor Core & ML
 **Owner: Neha**
-- [ ] Refactor `AnomalyDetector` to use configurable threshold
-- [ ] Ensure detector handles empty or malformed packets safely
-- [ ] Implement `get_model_metadata()` (version, training date, metrics)
+- [x] Refactor `AnomalyDetector` to use configurable threshold
+- [x] Ensure detector handles empty or malformed packets safely
+- [x] Implement `get_model_metadata()` (version, training date, metrics)
 
 ### Sensor Reliability
 **Owner: Neha**
@@ -118,6 +120,7 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### UI & Dashboard
 **Owner: Anees**
+- [x] Dashboard Mockup UI
 - [ ] Dashboard for sensors, alerts, trust scores
 - [ ] Live alert monitor
 - [ ] Block / Unblock controls
