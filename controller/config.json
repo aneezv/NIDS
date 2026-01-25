@@ -1,5 +1,4 @@
 {
-    "API_KEY": "secure-research-demo-key-123",
     "TRUST_THRESHOLD": 50,
     "BLOCK_THRESHOLD": 35,  
     "WHITELIST": [
