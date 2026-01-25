@@ -6,12 +6,16 @@ import urllib3
 import json
 import threading
 import psutil
+from dotenv import load_dotenv
 from features import parse_tshark_line
 from detector import AnomalyDetector
 
 # --- CONFIGURATION ---
 with open("config.json") as config :
     data = json.load(config)
+
+if os.getenv("API_KEY"):
+    data["API_KEY"] = os.getenv("API_KEY") 
     
 CONTROLLER_URL = data.get("controller_url")
 #create a heartbeat url to replace 'alert' with 'heartbeat'
