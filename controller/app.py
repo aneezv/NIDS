@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from verification import VerificationEngine
 
-load_dotenv
+load_dotenv()
 
 # --- CONFIGURATION ---
 
