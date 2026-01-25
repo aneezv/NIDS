@@ -13,8 +13,8 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 **Owner: Jisto**
 - [ ] Finalize project folder structure (sensor / controller / ui)
-- [ ] Setup Git repository and branching strategy
-- [ ] Define configuration format (.env, config files)
+- [x] Setup Git repository and branching strategy
+- [x] Define configuration format (.env, config files)
 - [ ] Define alert & heartbeat JSON schema
 
 ---
@@ -42,7 +42,7 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 ### API Security & Networking
 **Owner: Jisto**
 - [ ] Implement API authentication (API keys or mTLS)
-- [ ] Move secrets from config files to `.env`
+- [x] Move secrets from config files to `.env`
 - [ ] Enforce SSL-only communication (no HTTP fallback)
 - [ ] Validate all incoming sensor payloads
 
