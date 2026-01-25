@@ -12,10 +12,11 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 (Foundational – BLOCKER for all development)
 
 **Owner: Jisto**
+
 - [x] Finalize project folder structure (sensor / controller / ui)
 - [x] Setup Git repository and branching strategy
 - [x] Define configuration format (.env, config files)
-- [x] Define alert & heartbeat JSON schema
+- [ ] Define alert & heartbeat JSON schema
 
 ---
 
