@@ -93,7 +93,7 @@ def retry_worker():
                 QUEUE.popleft()
             except requests.RequestException:
                 pass # controller still down
-    time.sleep(2)
+        time.sleep(2)
 
 def send_heartbeat():
     """
