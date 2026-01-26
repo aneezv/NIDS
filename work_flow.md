@@ -32,8 +32,8 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 ### Sensor Reliability
 **Owner: Neha**
 - [x] Implement heartbeat thread (every 30s)
-- [] Queue alerts locally if controller is unreachable
-- [] Attach `sensor_id` to all outgoing messages
+- [x] Queue alerts locally if controller is unreachable
+- [x] Attach `sensor_id` to all outgoing messages
 
 ---
 
