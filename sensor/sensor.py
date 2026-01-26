@@ -6,6 +6,7 @@ import urllib3
 import json
 import threading
 import psutil
+from collections import deque
 from dotenv import load_dotenv
 from features import parse_tshark_line
 from detector import AnomalyDetector
@@ -34,7 +35,8 @@ detector = AnomalyDetector(
     model_path = MODEL_PATH,
     threshold = THRESHOLD
 )
-last_alert_time = {} 
+last_alert_time = {}
+QUEUE=deque()
 
 # Silence SSL Warnings only if we are forced to use verify=False
 # urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -65,8 +67,33 @@ def send_alert(ip, score):
     except requests.exceptions.SSLError as e:
         print(f"🔒 SSL Error: {e}")
 
+    except requests.RequestException:
+        QUEUE.append(payload)
+        print(f"❌ Controller Down , Queueing the alerts! {ip}")
     except Exception as e:
         print(f"❌ Controller Error: {e}")
+
+def retry_worker():
+    verify_param = False
+    if os.path.exists(CERT_PATH):
+            verify_param = CERT_PATH
+    while True:
+        if QUEUE:
+            payload = QUEUE[0]
+            try:
+                r=requests.post(
+                    CONTROLLER_URL, 
+                    json=payload, 
+                    headers={"X-NIDS-Auth": API_KEY}, 
+                    verify=verify_param, 
+                    timeout=1
+                )
+                r.raise_for_status()
+                print(f"🚀 Queue Alert Sent: {payload["ip"]} (Conf: {payload["score"]:.1f})")
+                QUEUE.popleft()
+            except requests.RequestException:
+                pass # controller still down
+    time.sleep(2)
 
 def send_heartbeat():
     """
@@ -163,8 +190,10 @@ def monitor_traffic():
 
 if __name__ == "__main__":
     heartbeat_thread = threading.Thread(target= send_heartbeat, daemon= True)
+    retry_thread = threading.Thread(target=retry_worker, daemon=True)
+
 
     heartbeat_thread.start()
-    print("💓 Heartbeat thread started...")
+    retry_thread.start()
 
     monitor_traffic()
