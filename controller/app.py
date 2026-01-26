@@ -2,6 +2,7 @@ import logging
 import threading
 import json
 import os
+from enforce_auth import register_security
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from verification import VerificationEngine
@@ -17,6 +18,9 @@ if os.getenv("API_KEY"):
     CONFIG["API_KEY"] = os.getenv("API_KEY")    
 
 app = Flask(__name__)
+app.config.update(CONFIG)
+register_security(app)
+
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -32,11 +36,6 @@ def receive_alert():
     """
     Sensor sends: { "sensor_id": "node1", "ip": "1.2.3.4", "score": 85 }
     """
-    # 1. Security Check (API Key)
-    api_key = request.headers.get('X-NIDS-Auth')
-    if api_key != CONFIG['API_KEY']:
-        return jsonify({"error": "Unauthorized"}), 401
-
     data = request.json
     if not data or 'ip' not in data:
         return jsonify({"error": "Invalid Data"}), 400
@@ -72,18 +71,14 @@ def heartbeat():
     
 @app.route('/config', methods=['POST', 'GET'])
 def manage_config():
-    # 1. Verify Admin Key
-    api_key = request.headers.get('X-NIDS-Auth')
-    if api_key != CONFIG['API_KEY']:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    # 2. Handle Updates
+    """
+    Admin endpoint to update config
+    """
     if request.method == 'POST':
         data = request.json
         if not data:
              return jsonify({"error": "No data received"}), 400
              
-        # MODIFIED: Only allow WHITELIST updates for now
         allowed_keys = ['WHITELIST']
         
         for key, value in data.items():
@@ -93,9 +88,7 @@ def manage_config():
                 
         return jsonify({"status": "updated", "current_config": CONFIG}), 200
 
-    # 3. Return current config (GET)
     return jsonify(CONFIG), 200
 
 if __name__ == '__main__':
-    # Fail if certs are missing. No fallback to HTTP allowed.
     app.run(host='0.0.0.0', port=5000, threaded=True, ssl_context=('cert.pem', 'key.pem'))

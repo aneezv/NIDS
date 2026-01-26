@@ -16,7 +16,7 @@ with open("config.json") as config :
 
 if os.getenv("API_KEY"):
     data["API_KEY"] = os.getenv("API_KEY") 
-    
+  
 CONTROLLER_URL = data.get("controller_url")
 #create a heartbeat url to replace 'alert' with 'heartbeat'
 HEARTBEAT_URL = CONTROLLER_URL.replace("alert","heartbeat")
@@ -64,8 +64,7 @@ def send_alert(ip, score):
         print(f"🚀 Alert Sent: {ip} (Conf: {score:.1f})")
     except requests.exceptions.SSLError as e:
         print(f"🔒 SSL Error: {e}")
-        print("💡 Tip: If you see 'Hostname Mismatch', the certificate doesn't match the Controller IP.")
-        print("   For this demo, you can temporarily revert verify=False in sensor.py if needed.")
+
     except Exception as e:
         print(f"❌ Controller Error: {e}")
 
