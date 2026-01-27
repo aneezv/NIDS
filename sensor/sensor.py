@@ -21,7 +21,7 @@ if os.getenv("API_KEY"):
 CONTROLLER_URL = data.get("controller_url")
 #create a heartbeat url to replace 'alert' with 'heartbeat'
 HEARTBEAT_URL = CONTROLLER_URL.replace("alert","heartbeat")
-API_KEY = data.get("api_key")
+API_KEY = data.get("API_KEY")
 INTERFACE = data.get("interface")
 BATCH_SIZE = data.get("batch_size")
 SENSOR_ID = data.get("sensor_id")

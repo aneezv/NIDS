@@ -1,5 +1,5 @@
 {
-    "sensor_id": "sensor_victim_01",
+    "sensor_id": "sensor_01",
     "controller_url": "https://controller.local:5000/alert",
     "interface": "eth0",
     "threshold": 0.10,
