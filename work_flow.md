@@ -60,15 +60,15 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Database & Models
 **Owner: Devika**
-- [ ] Setup SQLite with SQLAlchemy
-- [ ] Implement DB schema:
+- [x] Setup SQLite with SQLAlchemy
+- [x] Implement DB schema:
   - SensorNode (id, trust_score, last_seen, status)
   - Alert (id, timestamp, source_ip, sensor_id, raw_score)
   - BlockEvent (id, ip, blocked_at, expires_at)
 
 ### Trust Management
 **Owner: Devika**
-- [ ] Initialize trust score for new sensors
+- [x] Initialize trust score for new sensors
 - [ ] Update trust score based on verification outcomes
 - [ ] Persist trust changes in database
 
