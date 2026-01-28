@@ -42,10 +42,10 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### API Security & Networking
 **Owner: Jisto**
-- [ ] Implement API authentication (API keys or mTLS)
+- [x] Implement API authentication (API keys or mTLS)
 - [x] Move secrets from config files to `.env`
 - [x] Enforce SSL-only communication (no HTTP fallback)
-- [] Validate all incoming sensor payloads
+- [x] Validate all incoming sensor payloads
 
 ### Core Controller Endpoints
 **Owner: Jisto**
