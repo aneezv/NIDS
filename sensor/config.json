@@ -10,5 +10,6 @@
         "192.168.1.8",
         "10.0.0.50"
     ],
-    "cert_path": "rootCA.pem"
+    "cert_path": "rootCA.pem",
+    "API_KEY" : "secure-research-demo-key-123"
 }
