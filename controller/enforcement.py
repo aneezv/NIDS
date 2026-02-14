@@ -6,20 +6,23 @@ logger = logging.getLogger("NIDS_Controller.Enforcement")
 
 def calculate_ban_duration(ip,app):
     """
-    Returns seconds to ban based on repeat offenses.
+    Returns seconds to ban based on repeat offenses (previous blocks).
     """
     with app.app_context():
-        from models import Alert
-        offense_count = Alert.query.filter_by(source_ip = ip).count()
-    
-    if offense_count == 1:
+        from models import BlockEvent
+        # Count how many times this IP has been blocked before
+        offense_count = BlockEvent.query.filter_by(ip=ip).count()
+
+    # offense_count is previous blocks.
+    # 0 prev blocks = 1st offense
+    # 1 prev block = 2nd offense
+
+    if offense_count == 0:
         return 300      # 5 Minutes
-    elif offense_count == 2:
+    elif offense_count == 1:
         return 1800     # 30 Minutes
-    elif offense_count >= 3:
+    else:
         return 86400    # 24 Hours (Maximum Penalty)
-    
-    return 300 # Default
 
 def enforce_block(ip, threat_info, whitelist, app):
     """Executes the actual firewall block using ipset/iptables"""
@@ -31,10 +34,10 @@ def enforce_block(ip, threat_info, whitelist, app):
     duration = calculate_ban_duration(ip,app)
 
     with app.app_context():
-        from models import Alert
-        offense_count = Alert.query.filter_by(source_ip = ip).count()
-        
-    logger.info(f"⚔️ BLOCKING {ip} for {duration} seconds (Offense #{offense_count})")
+        from models import BlockEvent
+        offense_count = BlockEvent.query.filter_by(ip=ip).count()
+
+    logger.info(f"⚔️ BLOCKING {ip} for {duration} seconds (Offense #{offense_count + 1})")
 
     # 2. Pass duration to the script
     try:

@@ -1,6 +1,7 @@
 """
 Database Initialization Script
-Run ONCE to create all tables: python create_db_manual.py
+Run this to create tables if they don't exist.
+It will NOT delete existing data.
 """
 import sqlite3
 import os
@@ -9,14 +10,9 @@ import os
 basedir = os.path.abspath(os.path.dirname(__file__))
 db_path = os.path.join(basedir, 'nids.db')
 
-print(f"Creating database at: {db_path}")
+print(f"Checking database at: {db_path}")
 
-# Delete old database if exists
-if os.path.exists(db_path):
-    os.remove(db_path)
-    print("Removed old database file")
-
-# Connect to database (creates it)
+# Connect to database (creates it if not exists)
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
@@ -30,7 +26,7 @@ CREATE TABLE IF NOT EXISTS sensor_node (
     status VARCHAR(20) DEFAULT 'offline'
 )
 ''')
-print("✅ Created table: sensor_node")
+print("✅ Table checked/created: sensor_node")
 
 # Create alert table
 cursor.execute('''
@@ -43,7 +39,7 @@ CREATE TABLE IF NOT EXISTS alert (
     FOREIGN KEY (sensor_id) REFERENCES sensor_node(id)
 )
 ''')
-print("✅ Created table: alert")
+print("✅ Table checked/created: alert")
 
 # Create block_event table
 cursor.execute('''
@@ -55,7 +51,7 @@ CREATE TABLE IF NOT EXISTS block_event (
     expires_at DATETIME
 )
 ''')
-print("✅ Created table: block_event")
+print("✅ Table checked/created: block_event")
 
 # Commit and verify
 conn.commit()
@@ -67,5 +63,6 @@ print(f"\n📊 Database ready with tables: {[t[0] for t in tables]}")
 
 # Show file size
 conn.close()
-print(f"📁 Database file size: {os.path.getsize(db_path)} bytes")
-print("\n🎉 Database created successfully! You can now run app.py")
+if os.path.exists(db_path):
+    print(f"📁 Database file size: {os.path.getsize(db_path)} bytes")
+print("\n🎉 Database setup complete! You can now run app.py")

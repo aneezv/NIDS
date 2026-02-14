@@ -24,15 +24,16 @@ def hex_to_int(val):
 def capture_training_data():
     print(f"📡 Capturing {PACKET_LIMIT} packets for baseline... (Generate normal traffic now!)")
     
-    # Updated Tshark command with 'tcp.flags'
+    # Updated Tshark command with 'tcp.flags' AND 'udp.dstport'
     cmd = [
         "tshark", "-i", CAPTURE_INTERFACE,
         "-c", str(PACKET_LIMIT),
         "-T", "fields",
         "-e", "frame.len",        # Feature 1
-        "-e", "tcp.dstport",      # Feature 2
-        "-e", "ip.proto",         # Feature 3
-        "-e", "tcp.flags",        # Feature 4 (The Hex value)
+        "-e", "tcp.dstport",      # Feature 2 (TCP Port)
+        "-e", "udp.dstport",      # Feature 3 (UDP Port)
+        "-e", "ip.proto",         # Feature 4
+        "-e", "tcp.flags",        # Feature 5
         "-E", "separator=,",
         "-E", "header=y"
     ]
@@ -50,15 +51,21 @@ def capture_training_data():
     data = StringIO(stdout)
     df = pd.read_csv(data)
     
-    # --- CRITICAL FIX: CLEANING DATA ---
+    # --- CLEANING DATA ---
     # Fill empty values with 0
     df = df.fillna(0)
     
     # Force convert all feature columns from Hex Strings to Integers
-    # We apply the 'hex_to_int' function to every single cell
-    for col in ['frame.len', 'tcp.dstport', 'ip.proto', 'tcp.flags']:
+    for col in ['frame.len', 'tcp.dstport', 'udp.dstport', 'ip.proto', 'tcp.flags']:
         if col in df.columns:
             df[col] = df[col].apply(hex_to_int)
+
+    # --- COMBINE PORTS ---
+    # Logic matching sensor/features.py: sum tcp and udp ports
+    if 'udp.dstport' in df.columns:
+        df['port'] = df['tcp.dstport'] + df['udp.dstport']
+    else:
+        df['port'] = df['tcp.dstport']
 
     return df
 
@@ -67,8 +74,9 @@ def train_model(df):
     
     clf = IsolationForest(n_estimators=100, contamination=0.01, random_state=42)
     
-    # Select the 4 features
-    features = df[['frame.len', 'tcp.dstport', 'ip.proto', 'tcp.flags']]
+    # Select the 4 features matching detector.py expectations
+    # ['frame.len', 'port', 'ip.proto', 'tcp.flags']
+    features = df[['frame.len', 'port', 'ip.proto', 'tcp.flags']]
     
     clf.fit(features)
     
