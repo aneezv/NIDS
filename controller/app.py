@@ -79,7 +79,7 @@ def validate_alert_data(data):
     try:
         ipaddress.ip_address(data['ip'])
     except ValueError:
-        return False, f"Invalid IP format: {data['ip']}"'
+        return False, f"Invalid IP format: {data['ip']}"
     return True, None
     
 # --- API ENDPOINTS ---
