@@ -1,0 +1,9 @@
+.env
+.env.local
+.env.*.local
+node_modules/
+__pycache__/
+*.pem
+
+nids.db
+audit.log

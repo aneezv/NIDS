@@ -3,20 +3,40 @@ import requests
 import time
 import os
 import urllib3
+import json
+import threading
+import psutil
+from collections import deque
+from dotenv import load_dotenv
 from features import parse_tshark_line
 from detector import AnomalyDetector
 
 # --- CONFIGURATION ---
-CONTROLLER_URL = "https://192.168.16.42:5000/alert"
-API_KEY = "secure-research-demo-key-123"
-INTERFACE = "eth0"
-BATCH_SIZE = 10 
-SENSOR_ID = "sensor_victim_01"
-CERT_PATH = "cert.pem" # Path to the certificate copied from controller
+with open("config.json") as config :
+    data = json.load(config)
+
+if os.getenv("API_KEY"):
+    data["API_KEY"] = os.getenv("API_KEY") 
+  
+CONTROLLER_URL = data.get("controller_url")
+#create a heartbeat url to replace 'alert' with 'heartbeat'
+HEARTBEAT_URL = CONTROLLER_URL.replace("alert","heartbeat")
+API_KEY = data.get("API_KEY")
+INTERFACE = data.get("interface")
+BATCH_SIZE = data.get("batch_size")
+SENSOR_ID = data.get("sensor_id")
+MODEL_PATH = data.get("model_path")
+THRESHOLD = data.get("threshold")
+WHITELIST = data.get("whitelist", ["127.0.0.1"])
+CERT_PATH = data.get("cert_path", "cert.pem") # Path to the certificate copied from controller
 
 # --- INITIALIZATION ---
-detector = AnomalyDetector("model.pkl")
-last_alert_time = {} 
+detector = AnomalyDetector(
+    model_path = MODEL_PATH,
+    threshold = THRESHOLD
+)
+last_alert_time = {}
+QUEUE=deque()
 
 # Silence SSL Warnings only if we are forced to use verify=False
 # urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -46,10 +66,71 @@ def send_alert(ip, score):
         print(f"🚀 Alert Sent: {ip} (Conf: {score:.1f})")
     except requests.exceptions.SSLError as e:
         print(f"🔒 SSL Error: {e}")
-        print("💡 Tip: If you see 'Hostname Mismatch', the certificate doesn't match the Controller IP.")
-        print("   For this demo, you can temporarily revert verify=False in sensor.py if needed.")
+
+    except requests.RequestException:
+        QUEUE.append(payload)
+        print(f"❌ Controller Down , Queueing the alerts! {ip}")
     except Exception as e:
         print(f"❌ Controller Error: {e}")
+
+def retry_worker():
+    verify_param = False
+    if os.path.exists(CERT_PATH):
+            verify_param = CERT_PATH
+    while True:
+        if QUEUE:
+            payload = QUEUE[0]
+            try:
+                r=requests.post(
+                    CONTROLLER_URL, 
+                    json=payload, 
+                    headers={"X-NIDS-Auth": API_KEY}, 
+                    verify=verify_param, 
+                    timeout=1
+                )
+                r.raise_for_status()
+                print(f"🚀 Queue Alert Sent: {payload["ip"]} (Conf: {payload["score"]:.1f})")
+                QUEUE.popleft()
+            except requests.RequestException:
+                pass # controller still down
+        time.sleep(2)
+
+def send_heartbeat():
+    """
+    Runs in a background thread. Sends a heartbeat to the controller every 30s.
+    """
+    while True:
+        try:
+
+            CPU_LOAD = psutil.cpu_percent(interval=None)
+
+            # Create the small JSON payload
+            payload = {
+                "sensor_id": SENSOR_ID,
+                "cpu_load": CPU_LOAD
+            }
+            
+            # SSL Logic (same as send_alert)
+            verify_param = False
+            if os.path.exists(CERT_PATH):
+                verify_param = CERT_PATH
+
+            # Send the request
+            requests.post(
+                HEARTBEAT_URL, 
+                json=payload, 
+                headers={"X-NIDS-Auth": API_KEY}, 
+                verify=verify_param, 
+                timeout=2
+            )
+            # Optional: Print to console for debugging (can remove later)
+            print(f"💓 Heartbeat sent to {HEARTBEAT_URL}")
+            
+        except Exception as e:
+            # If it fails, just print a small error, don't crash
+            print(f"⚠️ Heartbeat failed: {e}")
+        
+        time.sleep(30)
 
 def monitor_traffic():
     cmd = [
@@ -79,7 +160,7 @@ def monitor_traffic():
                 continue
 
             # Whitelist Self/Router to avoid feedback loops
-            if src_ip in ["127.0.0.1", "192.168.1.8", "10.0.0.50"]: 
+            if src_ip in WHITELIST: 
                 continue
 
             batch_data.append(features)
@@ -108,4 +189,11 @@ def monitor_traffic():
         print(f"💥 Sensor Crash: {e}")
 
 if __name__ == "__main__":
+    heartbeat_thread = threading.Thread(target= send_heartbeat, daemon= True)
+    retry_thread = threading.Thread(target=retry_worker, daemon=True)
+
+
+    heartbeat_thread.start()
+    retry_thread.start()
+
     monitor_traffic()
