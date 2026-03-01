@@ -122,10 +122,10 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 ### UI & Dashboard
 **Owner: Anees**
 - [x] Dashboard Mockup UI
-- [ ] Dashboard for sensors, alerts, trust scores
-- [ ] Live alert monitor
-- [ ] Block / Unblock controls
-- [ ] System health indicators
+- [x] Dashboard for sensors, alerts, trust scores
+- [x] Live alert monitor
+- [x] Block / Unblock controls
+- [x] System health indicators
 
 ### Integration & Testing
 **Owner: Anees (Lead) + All Members**
