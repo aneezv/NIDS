@@ -97,10 +97,10 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Firewall & Response
 **Owner: Jisto**
-- [ ] Implement `block_ip()` at router level
-- [ ] Implement `unblock_ip()` and temporary bans
-- [ ] Implement runtime IP whitelist
-- [ ] Add manual override hooks
+- [x] Implement `block_ip()` at router level
+- [x] Implement `unblock_ip()` and temporary bans
+- [x] Implement runtime IP whitelist
+- [x] Add manual override hooks
 
 ---
 

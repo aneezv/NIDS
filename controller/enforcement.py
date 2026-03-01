@@ -47,3 +47,13 @@ def enforce_block(ip, threat_info, whitelist, app):
 
     except Exception as e:
         logger.error(f"Failed to execute block: {e}")
+
+def remove_ban(ip):
+    """Executes the actual firewall unblock using ipset/iptables"""
+    logger.info(f"🛡️ UNBLOCKING {ip} manually")
+    
+    try:
+        subprocess.run(["sudo", "./unblock_ip.sh", ip], check=True)
+        logger.info(f"Successfully called unblock_ip.sh for {ip}")
+    except Exception as e:
+        logger.error(f"Failed to execute unblock: {e}")

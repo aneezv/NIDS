@@ -10,6 +10,7 @@ import ipaddress
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from verification import VerificationEngine
+from enforcement import remove_ban, enforce_block
 load_dotenv()
 # --- CONFIGURATION ---
 with open('config.json') as f:
@@ -148,17 +149,77 @@ def system_status():
 # [NEW] Management API: Unban
 @app.route('/api/action/unban', methods=['POST'])
 def unban_ip():
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+         
     data = request.json
     ip = data.get('ip')
+    if not ip:
+         return jsonify({"error": "IP is required"}), 400
     
-    # Logic to call unblock script would go here (Jisto's task)
+    # Logic to call unblock script
     logger.info(f"[ADMIN] [UNBAN] Request to unban {ip}")
+    remove_ban(ip)
     
     # Remove from BlockEvent DB
     BlockEvent.query.filter_by(ip=ip).delete()
     db.session.commit()
     
     return jsonify({"status": "unbanned", "ip": ip})
+
+# [NEW] Management API: Manual Block
+@app.route('/api/action/block', methods=['POST'])
+def block_ip_manual():
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+         
+    data = request.json
+    ip = data.get('ip')
+    if not ip:
+         return jsonify({"error": "IP is required"}), 400
+    
+    logger.info(f"[ADMIN] [BLOCK] Request to manually block {ip}")
+    enforce_block(ip, {"score": 100.0}, CONFIG.get('WHITELIST', []), app)
+    
+    # Record in database
+    block_event = BlockEvent(ip=ip, reason=f"Manual Override Block")
+    db.session.add(block_event)
+    db.session.commit()
+    
+    return jsonify({"status": "blocked", "ip": ip})
+
+# [NEW] Management API: Whitelist
+@app.route('/api/action/whitelist', methods=['POST'])
+def whitelist_ip():
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+         
+    data = request.json
+    ip = data.get('ip')
+    if not ip:
+         return jsonify({"error": "IP is required"}), 400
+         
+    logger.info(f"[ADMIN] [WHITELIST] Request to whitelist {ip}")
+    
+    # Unban just in case they were previously banned
+    remove_ban(ip)
+    BlockEvent.query.filter_by(ip=ip).delete()
+    db.session.commit()
+    
+    # Add to runtime whitelist
+    if 'WHITELIST' not in CONFIG:
+        CONFIG['WHITELIST'] = []
+    
+    if ip not in CONFIG['WHITELIST']:
+        CONFIG['WHITELIST'].append(ip)
+        # Optional: Save back to config.json here if persistence is needed
+        try:
+           with open('config.json', 'w') as f:
+               json.dump(CONFIG, f, indent=4)
+        except Exception as e:
+           logger.error(f"Could not persist config.json: {e}")
+           
+    return jsonify({"status": "whitelisted", "ip": ip, "whitelist": CONFIG['WHITELIST']})
 
 
  #Heartbeat
