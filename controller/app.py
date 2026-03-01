@@ -2,7 +2,7 @@ import logging
 import threading
 import json
 import os
-from models import db, SensorNode, Alert, BlockEvent
+from models import db, SensorNode, Alert, BlockEvent, HoneypotEvent, ThreatEscalation
 from datetime import datetime 
 import secrets
 import ipaddress
@@ -270,8 +270,85 @@ def manage_config():
 @app.route('/trust', methods=['GET'])
 def get_trust():
     """Admin endpoint to view sensor health"""
-    # Optional: Protect this too? Leaving public for dashboard for now.
     return jsonify(engine.get_trust_scores())
+
+# --- [NEW] HONEYPOT EVENT LOGGING API ---
+@app.route('/api/honeypot/event', methods=['POST'])
+def log_honeypot_event():
+    """Called by honeypot.py to log interactions for historical correlation."""
+    if not check_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.json
+    event = HoneypotEvent(
+        source_ip=data.get('source_ip'),
+        port=data.get('port'),
+        payload=data.get('payload', '')[:500],
+        tool_sig=data.get('tool_sig'),
+        technique=data.get('technique')
+    )
+    db.session.add(event)
+    db.session.commit()
+    
+    logger.info(f"🪤 [HONEYPOT EVENT] {data.get('source_ip')} on port {data.get('port')} | tool={data.get('tool_sig')} | technique={data.get('technique')}")
+    return jsonify({"status": "logged"}), 200
+
+# --- [NEW] CANARY ENDPOINT ---
+@app.route('/api/v2/admin/users', methods=['GET', 'POST'])
+def canary_admin():
+    """
+    Fake admin endpoint. Any access = attacker probing for admin panels.
+    No legitimate user or process should ever hit this.
+    """
+    ip = request.remote_addr
+    logger.critical(f"🚨 [CANARY TRIGGERED] {ip} hit canary admin endpoint /api/v2/admin/users!")
+    
+    # Instant block — canary = definitive proof
+    enforce_block(ip, {"score": 100}, CONFIG.get('WHITELIST', []), app)
+    block_event = BlockEvent(ip=ip, reason="Canary Endpoint Triggered")
+    db.session.add(block_event)
+    db.session.commit()
+    
+    # Return 404 to not reveal the trap
+    return jsonify({"error": "Not Found"}), 404
+
+# --- [NEW] BREADCRUMB INJECTION ---
+@app.after_request
+def inject_breadcrumbs(response):
+    """
+    For borderline/tarpitted IPs, inject fake internal server headers
+    that point to our honeypot services.
+    """
+    try:
+        client_ip = request.remote_addr
+        escalation = ThreatEscalation.query.filter_by(ip=client_ip).first()
+        
+        if escalation:
+            # Inject enticing fake headers that lead to honeypot ports
+            response.headers['X-Debug-Backend'] = 'admin-panel.internal:8443'
+            response.headers['X-Forwarded-Server'] = 'staging-db.local:2323'
+            response.headers['X-Internal-SSH'] = 'dev-server.local:8222'
+            logger.info(f"🍞 [BREADCRUMB] Injected deception headers for {client_ip}")
+    except Exception:
+        pass  # Silently fail — never break normal responses
+    
+    return response
+
+# --- [NEW] TTL CLEANUP DAEMON ---
+def ttl_cleanup_daemon():
+    """Background thread that cleans up expired tarpit/honeypot rules every 5 minutes."""
+    import time
+    while True:
+        time.sleep(300)  # 5 minutes
+        try:
+            engine.cleanup_expired_escalations()
+        except Exception as e:
+            logger.error(f"[TTL DAEMON] Error: {e}")
+
+# Start the TTL daemon
+ttl_thread = threading.Thread(target=ttl_cleanup_daemon, daemon=True)
+ttl_thread.start()
+
 if __name__ == '__main__':
     # Fail if certs are missing. No fallback to HTTP allowed.
     app.run(host='0.0.0.0', port=5000, threaded=True, ssl_context=('cert.pem', 'key.pem'))

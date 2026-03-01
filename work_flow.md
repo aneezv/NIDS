@@ -109,10 +109,10 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Honeypot Integration
 **Owner: Neha (Deployment) + Jisto (Integration)**
-- [ ] Deploy low-interaction honeypot
-- [ ] Activate honeypot only for low-trust/borderline cases
-- [ ] Log interaction attempts
-- [ ] Feed honeypot evidence into verification engine
+- [x] Deploy low-interaction honeypot
+- [x] Activate honeypot only for low-trust/borderline cases
+- [x] Log interaction attempts
+- [x] Feed honeypot evidence into verification engine
 
 ---
 

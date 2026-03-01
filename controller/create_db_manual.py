@@ -53,6 +53,32 @@ CREATE TABLE IF NOT EXISTS block_event (
 ''')
 print("✅ Table checked/created: block_event")
 
+# Create honeypot_event table
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS honeypot_event (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_ip VARCHAR(50),
+    port INTEGER,
+    payload TEXT,
+    tool_sig VARCHAR(100),
+    technique VARCHAR(50),
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+''')
+print("✅ Table checked/created: honeypot_event")
+
+# Create threat_escalation table
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS threat_escalation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip VARCHAR(50) UNIQUE,
+    level INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME
+)
+''')
+print("✅ Table checked/created: threat_escalation")
+
 # Commit and verify
 conn.commit()
 

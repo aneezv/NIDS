@@ -1,6 +1,12 @@
 {
     "TRUST_THRESHOLD": 50,
-    "BLOCK_THRESHOLD": 35,  
+    "BLOCK_THRESHOLD": 35,
+    "WARNING_THRESHOLD": 17.5,
+    "HONEYPOT_PORTS": [
+        8443,
+        2323,
+        8222
+    ],
     "WHITELIST": [
         "127.0.0.1",
         "192.168.1.8",
