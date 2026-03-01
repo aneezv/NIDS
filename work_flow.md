@@ -69,8 +69,8 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 ### Trust Management
 **Owner: Devika**
 - [x] Initialize trust score for new sensors
-- [ ] Update trust score based on verification outcomes
-- [ ] Persist trust changes in database
+- [x] Update trust score based on verification outcomes
+- [x] Persist trust changes in database
 
 ---
 

@@ -55,7 +55,16 @@ class VerificationEngine:
                 block_event = BlockEvent(ip=ip, reason=f"Threat Score: {total_threat:.2f}")
                 db.session.add(block_event)
 
+                # [NEW] Increase trust score for successful verification
+                sensor.trust_score = min(100.0, sensor.trust_score + 5.0)
+
                 logger.info(f"[SYSTEM] [BLOCK] {ip} blocked (Score: {total_threat:.2f})")
+            else:
+                # [NEW] Decrease trust score slightly for unverified threats
+                sensor.trust_score = max(0.0, sensor.trust_score - 1.0)
+                logger.info(f"[SYSTEM] [VERIFY] {ip} threat unverified by Sensor {sensor.id} (Score: {total_threat:.2f})")
+
+            logger.info(f"[TRUST] Sensor {sensor.id} trust score updated to {sensor.trust_score:.2f}")
 
             # Commit all changes
             db.session.commit()
