@@ -79,16 +79,23 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Verification Rules
 **Owner: Jisto (Logic) + Devika (Data Access)**
-- [ ] Correlate alerts from multiple sensors
-- [ ] Fetch trust score of alerting sensor
-- [ ] Evaluate runtime IP behavior history
-- [ ] Compute verification confidence score
+- [x] Correlate alerts from multiple sensors
+- [x] Fetch trust score of alerting sensor
+- [ ] Evaluate runtime IP behavior history        _(partial: 1-hour cumulative window only)_
+- [ ] Compute verification confidence score        _(not implemented as named value)_
 
 ### Trust-Aware Decision Logic
 **Owner: Jisto**
-- [ ] High-trust sensor → fewer verification steps
-- [ ] Low-trust sensor → require stronger evidence
-- [ ] Borderline confidence → flag for honeypot verification
+- [x] High-trust sensor → fewer verification steps
+- [x] Low-trust sensor → require stronger evidence
+- [x] Borderline confidence → enqueue IP for honeypot via `HoneypotQueue` table
+
+### Verdict Visibility
+**Owner: Jisto**
+- [x] `process_threat()` returns structured dict: `{ ip, score, confidence, verdict, sensor_trust, sensors }`
+- [x] Every verdict persisted to `VerificationResult` DB table
+- [x] `GET /api/verdicts` endpoint exposes verdicts to dashboard
+- [x] `GET /api/honeypot` endpoint exposes unprocessed BORDERLINE queue
 
 ---
 
