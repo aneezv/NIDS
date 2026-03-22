@@ -41,6 +41,15 @@ class AnomalyDetector:
             "threshold" : self.threshold
         }
 
+    def load_model(self, new_path):
+        """
+        Hot-swaps the model at runtime without restarting.
+        Called by sensor.py's hot_reload() function.
+        """
+        self.model = joblib.load(new_path)
+        self.model_path = new_path
+        print(f"🔄 Model reloaded: {new_path}")
+
     def predict_batch(self, batch_features):
         """
         batch_features: List of lists [frame_len, port, proto, flags]
