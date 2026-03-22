@@ -132,6 +132,39 @@ def send_heartbeat():
         
         time.sleep(30)
 
+def hot_reload(new_path):
+    """
+    Reloads the Isolation Forest model at runtime.
+    Can be called manually or by the watcher thread.
+    """
+    try:
+        detector.load_model(new_path)
+        print(f"🔄 Model reloaded: {os.path.basename(new_path)}")
+    except Exception as e:
+        print(f"⚠️ Hot reload failed: {e}")
+
+
+def model_watcher():
+    """
+    Background thread: checks every 5 minutes if model_latest.pkl
+    is newer than the currently loaded model. If yes, reloads it.
+    """
+    watch_path = os.path.join(os.path.dirname(MODEL_PATH), "model_latest.pkl")
+    last_mtime = None
+
+    while True:
+        try:
+            if os.path.exists(watch_path):
+                current_mtime = os.path.getmtime(watch_path)
+                if last_mtime is None or current_mtime > last_mtime:
+                    print(f"🔍 New model detected: model_latest.pkl")
+                    hot_reload(watch_path)
+                    last_mtime = current_mtime
+        except Exception as e:
+            print(f"⚠️ Model watcher error: {e}")
+
+        time.sleep(300)  # Check every 5 minutes
+
 def monitor_traffic():
     cmd = [
         "tshark", "-i", INTERFACE,
@@ -189,11 +222,12 @@ def monitor_traffic():
         print(f"💥 Sensor Crash: {e}")
 
 if __name__ == "__main__":
-    heartbeat_thread = threading.Thread(target= send_heartbeat, daemon= True)
+    heartbeat_thread = threading.Thread(target=send_heartbeat, daemon=True)
     retry_thread = threading.Thread(target=retry_worker, daemon=True)
-
+    watcher_thread = threading.Thread(target=model_watcher, daemon=True)
 
     heartbeat_thread.start()
     retry_thread.start()
+    watcher_thread.start()
 
     monitor_traffic()
