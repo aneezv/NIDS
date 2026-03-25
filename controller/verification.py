@@ -118,12 +118,31 @@ class VerificationEngine:
             # 3d. Trust-weighted impact for the current alert
             weighted_impact = raw_score * (current_trust / 100.0)
 
-            # 3e. Final threat score
+            # 3e. Base final threat score
             total_threat = cumulative_score + weighted_impact + correlation_bonus
+
+            # 3f. IP Persistence Bonus (N3)
+            # Group alerts into 15-minute buckets. If an IP appears in 3+ distinct buckets
+            # within the last hour, add a +5.0 persistence bonus to the threat score.
+            persistence_bonus = 0.0
+            if len(recent_alerts) >= 3:
+                distinct_buckets = set()
+                for alert in recent_alerts:
+                    bucket_group = alert.timestamp.minute // 15
+                    bucket_id = f"{alert.timestamp.strftime('%Y-%m-%d-%H')}-{bucket_group}"
+                    distinct_buckets.add(bucket_id)
+                    
+                if len(distinct_buckets) >= 3:
+                    persistence_bonus = 5.0
+                    total_threat += persistence_bonus
+                    logger.warning(
+                        f"[PATTERN] Persistent threat detected for {ip} across "
+                        f"{len(distinct_buckets)} time windows. Applied +5.0 bonus."
+                    )
 
             logger.info(
                 f"Analysis: IP={ip} | Sensors={distinct_sensors} | "
-                f"Threat={total_threat:.2f} (Bonus: {correlation_bonus}) | "
+                f"Threat={total_threat:.2f} (Corr: {correlation_bonus}, Pers: {persistence_bonus}) | "
                 f"ReportedBy={sensor_id} (Trust: {current_trust})"
             )
 
