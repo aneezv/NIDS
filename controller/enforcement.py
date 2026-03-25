@@ -4,14 +4,13 @@ import subprocess
 # Use child logger - inherits handlers from parent "NIDS_Controller"
 logger = logging.getLogger("NIDS_Controller.Enforcement")
 
-def calculate_ban_duration(ip,app):
+def calculate_ban_duration(ip, app):
     """
     Returns seconds to ban based on repeat offenses (previous blocks).
     """
-    with app.app_context():
-        from models import BlockEvent
-        # Count how many times this IP has been blocked before
-        offense_count = BlockEvent.query.filter_by(ip=ip).count()
+    from models import BlockEvent
+    # Count how many times this IP has been blocked before
+    offense_count = BlockEvent.query.filter_by(ip=ip).count()
 
     # offense_count is previous blocks.
     # 0 prev blocks = 1st offense
@@ -31,11 +30,10 @@ def enforce_block(ip, threat_info, whitelist, app):
         return
 
     # 1. Calculate Duration
-    duration = calculate_ban_duration(ip,app)
+    duration = calculate_ban_duration(ip, app)
 
-    with app.app_context():
-        from models import BlockEvent
-        offense_count = BlockEvent.query.filter_by(ip=ip).count()
+    from models import BlockEvent
+    offense_count = BlockEvent.query.filter_by(ip=ip).count()
 
     logger.info(f"⚔️ BLOCKING {ip} for {duration} seconds (Offense #{offense_count + 1})")
 

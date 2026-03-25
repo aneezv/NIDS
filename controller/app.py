@@ -3,7 +3,6 @@ import threading
 import json
 import os
 from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
-from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
 from datetime import datetime 
 import secrets
 import ipaddress
@@ -13,9 +12,30 @@ from flask import Flask, request, jsonify, send_from_directory
 from verification import VerificationEngine
 from enforcement import remove_ban, enforce_block
 load_dotenv()
+import socket
+
 # --- CONFIGURATION ---
 with open('config.json') as f:
     CONFIG = json.load(f)
+
+# Auto-whitelist the controller's own IP so it never blocks itself
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+controller_ip = get_local_ip()
+if 'WHITELIST' not in CONFIG:
+    CONFIG['WHITELIST'] = []
+if controller_ip not in CONFIG['WHITELIST']:
+    CONFIG['WHITELIST'].append(controller_ip)
+if "127.0.0.1" not in CONFIG['WHITELIST']:
+    CONFIG['WHITELIST'].append("127.0.0.1")
 if os.getenv("API_KEY"):
     CONFIG["API_KEY"] = os.getenv("API_KEY")    
 app = Flask(__name__)
@@ -27,10 +47,15 @@ import os
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'nids.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    "pool_pre_ping": True,
+    "connect_args": {
+        "timeout": 15
+    }
+}
 db.init_app(app)
 
-# NOTE: Tables created manually via create_db_manual.py
-# Do NOT use db.create_all() - it wipes existing data!
+# NOTE: Initialize or migrate the database using setup_db.py
 
 # --- LOGGING ---
 import sys
@@ -180,7 +205,13 @@ def block_ip_manual():
          return jsonify({"error": "IP is required"}), 400
     
     logger.info(f"[ADMIN] [BLOCK] Request to manually block {ip}")
-    enforce_block(ip, {"score": 100.0}, CONFIG.get('WHITELIST', []), app)
+    
+    whitelist = CONFIG.get('WHITELIST', [])
+    if ip in whitelist:
+         logger.warning(f"[ADMIN] [BLOCK] Rejected: {ip} is whitelisted.")
+         return jsonify({"error": f"Cannot block {ip} (Whitelisted)"}), 400
+         
+    enforce_block(ip, {"score": 100.0}, whitelist, app)
     
     # Record in database
     block_event = BlockEvent(ip=ip, reason=f"Manual Override Block")
@@ -257,8 +288,8 @@ def manage_config():
         if not data:
              return jsonify({"error": "No data received"}), 400
              
-        # MODIFIED: Only allow WHITELIST updates for now
-        allowed_keys = ['WHITELIST']
+        # Allow WHITELIST, BLOCK_THRESHOLD, TRUST_THRESHOLD updates from dashboard
+        allowed_keys = ['WHITELIST', 'BLOCK_THRESHOLD', 'TRUST_THRESHOLD']
         
         for key, value in data.items():
             if key in allowed_keys:
@@ -360,18 +391,18 @@ import time
 
 def background_maintenance():
     """
-    Runs every 60 seconds in a daemon thread:
-      D2 — Marks sensors as 'offline' if last_seen > 2 minutes ago.
+    Runs every 15 seconds in a daemon thread:
+      D2 — Marks sensors as 'offline' if last_seen > 30 seconds ago.
       D3 — Deletes expired BlockEvent records and lifts their firewall bans.
     """
     while True:
-        time.sleep(60)
+        time.sleep(15)
         try:
             with app.app_context():
                 now = datetime.utcnow()
 
                 # --- D2: Sensor Offline Detection ---
-                cutoff = now - timedelta(minutes=2)
+                cutoff = now - timedelta(seconds=30)
                 stale_sensors = SensorNode.query.filter(
                     SensorNode.last_seen < cutoff,
                     SensorNode.status != "offline"
@@ -403,7 +434,7 @@ def background_maintenance():
 # Start the maintenance thread as a daemon (auto-exits with the app)
 maintenance_thread = threading.Thread(target=background_maintenance, daemon=True)
 maintenance_thread.start()
-logger.info("[MAINTENANCE] Background maintenance thread started (60s interval)")
+logger.info("[MAINTENANCE] Background maintenance thread started (15s interval)")
 
 if __name__ == '__main__':
     # Try SSL first; fall back to plain HTTP for dev/testing
