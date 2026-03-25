@@ -94,9 +94,7 @@ def trigger_honeypot(ip, score, app):
 
 class VerificationEngine:
     def __init__(self, config, app):
-    def __init__(self, config, app):
         self.config = config
-        self.app = app
         self.app = app
 
     def process_threat(self, sensor_id, ip, raw_score):
