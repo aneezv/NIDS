@@ -3,6 +3,7 @@ import threading
 import json
 import os
 from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
+from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
 from datetime import datetime 
 import secrets
 import ipaddress
@@ -352,6 +353,57 @@ def list_honeypot_queue():
         "score":     e.score,
         "queued_at": e.queued_at.isoformat()
     } for e in entries])
+
+# --- BACKGROUND MAINTENANCE THREAD (D2 + D3) ---
+from datetime import timedelta
+import time
+
+def background_maintenance():
+    """
+    Runs every 60 seconds in a daemon thread:
+      D2 — Marks sensors as 'offline' if last_seen > 2 minutes ago.
+      D3 — Deletes expired BlockEvent records and lifts their firewall bans.
+    """
+    while True:
+        time.sleep(60)
+        try:
+            with app.app_context():
+                now = datetime.utcnow()
+
+                # --- D2: Sensor Offline Detection ---
+                cutoff = now - timedelta(minutes=2)
+                stale_sensors = SensorNode.query.filter(
+                    SensorNode.last_seen < cutoff,
+                    SensorNode.status != "offline"
+                ).all()
+                for node in stale_sensors:
+                    node.status = "offline"
+                    logger.info(
+                        f"[MAINTENANCE] Sensor {node.id} marked offline "
+                        f"(last seen: {node.last_seen})"
+                    )
+
+                # --- D3: BlockEvent Expiry Cleanup ---
+                expired_blocks = BlockEvent.query.filter(
+                    BlockEvent.expires_at != None,
+                    BlockEvent.expires_at < now
+                ).all()
+                for block in expired_blocks:
+                    logger.info(
+                        f"[MAINTENANCE] Expired block removed: {block.ip} "
+                        f"(expired at: {block.expires_at})"
+                    )
+                    remove_ban(block.ip)
+                    db.session.delete(block)
+
+                db.session.commit()
+        except Exception as e:
+            logger.error(f"[MAINTENANCE] Background task error: {e}")
+
+# Start the maintenance thread as a daemon (auto-exits with the app)
+maintenance_thread = threading.Thread(target=background_maintenance, daemon=True)
+maintenance_thread.start()
+logger.info("[MAINTENANCE] Background maintenance thread started (60s interval)")
 
 if __name__ == '__main__':
     # Try SSL first; fall back to plain HTTP for dev/testing

@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta
 from enforcement import enforce_block
 from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
+from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
 from sqlalchemy import func, distinct
 
 # Use child logger - inherits handlers from parent "NIDS_Controller"
@@ -49,13 +50,67 @@ def trigger_honeypot(ip, score, app):
 # Verification Engine
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def get_required_threshold(trust, distinct_sensors, block_threshold):
+    """
+    Returns the trust-adjusted score threshold needed to trigger enforcement.
+
+    Decision table (BLOCK_THRESHOLD = 35 by default):
+        trust >= 75  → block_threshold          (35)   — high trust, standard bar
+        trust >= 40  → block_threshold * 1.5    (52.5) — mid trust, harder bar
+        trust <  40  → block_threshold * 2.0    (70)   — low trust, very hard bar
+        trust <  40 and single sensor → 999             — force defer, not blockable alone
+    """
+    if trust >= 75:
+        return block_threshold
+    elif trust >= 40:
+        return block_threshold * 1.5
+    else:
+        if distinct_sensors < 2:
+            return 999          # Low-trust single sensor: cannot block unilaterally
+        return block_threshold * 2.0
+
+
+def trigger_honeypot(ip, score, app):
+    """
+    Enqueues an IP for honeypot follow-up by writing it to the HoneypotQueue table.
+    This is a real action — not a placeholder. The honeypot worker (Phase 6) reads
+    this table and processes unhandled entries (processed=False).
+    """
+    with app.app_context():
+        entry = HoneypotQueue(ip=ip, score=score)
+        db.session.add(entry)
+        db.session.commit()
+    logger.info(f"[HONEYPOT] {ip} queued for honeypot verification (Score: {score:.2f})")
+
+
+# ---------------------------------------------------------------------------
+# Verification Engine
+# ---------------------------------------------------------------------------
+
 class VerificationEngine:
     def __init__(self, config, app):
+    def __init__(self, config, app):
         self.config = config
+        self.app = app
         self.app = app
 
     def process_threat(self, sensor_id, ip, raw_score):
         """
+        Evaluates an incoming alert and produces a verified verdict.
+
+        Decision states:
+            BLOCK       — total_threat > required_threshold    → enforce firewall block
+            BORDERLINE  — total_threat >= BLOCK_THRESHOLD but
+                          total_threat <= required_threshold   → queue for honeypot
+            UNVERIFIED  — total_threat < BLOCK_THRESHOLD       → insufficient evidence
+
+        Returns:
+            dict: { ip, score, confidence, verdict, sensor_trust, sensors }
         Evaluates an incoming alert and produces a verified verdict.
 
         Decision states:
@@ -72,8 +127,13 @@ class VerificationEngine:
             # ------------------------------------------------------------------
             # 1. Init sensor if new (default trust = 50.0)
             # ------------------------------------------------------------------
+
+            # ------------------------------------------------------------------
+            # 1. Init sensor if new (default trust = 50.0)
+            # ------------------------------------------------------------------
             sensor = SensorNode.query.get(sensor_id)
             if not sensor:
+                sensor = SensorNode(id=sensor_id, trust_score=50.0)
                 sensor = SensorNode(id=sensor_id, trust_score=50.0)
                 db.session.add(sensor)
                 db.session.commit()
@@ -84,8 +144,15 @@ class VerificationEngine:
             # 2. Record incoming alert
             # ------------------------------------------------------------------
             new_alert = Alert(sensor_id=sensor_id, source_ip=ip, score=raw_score)
+            # ------------------------------------------------------------------
+            # 2. Record incoming alert
+            # ------------------------------------------------------------------
+            new_alert = Alert(sensor_id=sensor_id, source_ip=ip, score=raw_score)
             db.session.add(new_alert)
 
+            # ------------------------------------------------------------------
+            # 3. Cumulative threat — all alerts for this IP in the last 1 hour
+            # ------------------------------------------------------------------
             # ------------------------------------------------------------------
             # 3. Cumulative threat — all alerts for this IP in the last 1 hour
             # ------------------------------------------------------------------
@@ -96,6 +163,7 @@ class VerificationEngine:
             ).all()
 
             # 3a. Count distinct sensors reporting this IP (for correlation)
+            # 3a. Count distinct sensors reporting this IP (for correlation)
             distinct_sensors = db.session.query(
                 func.count(distinct(Alert.sensor_id))
             ).filter(
@@ -103,8 +171,11 @@ class VerificationEngine:
                 Alert.timestamp >= cutoff_time
             ).scalar()
 
+
             if distinct_sensors == 0:
                 distinct_sensors = 1
+
+            # 3b. Correlation bonus: +10 per extra sensor, capped at +20
 
             # 3b. Correlation bonus: +10 per extra sensor, capped at +20
             correlation_bonus = 0
