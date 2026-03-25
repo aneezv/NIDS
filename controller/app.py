@@ -8,7 +8,7 @@ import secrets
 import ipaddress
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from verification import VerificationEngine
 from enforcement import remove_ban, enforce_block
 load_dotenv()
@@ -272,6 +272,58 @@ def get_trust():
     """Admin endpoint to view sensor health"""
     # Optional: Protect this too? Leaving public for dashboard for now.
     return jsonify(engine.get_trust_scores())
+
+# --- DASHBOARD ROUTES ---
+DASHBOARD_DIR = os.path.join(basedir, 'dashboard')
+
+@app.route('/dashboard')
+def serve_dashboard():
+    """Serve the main dashboard page"""
+    return send_from_directory(DASHBOARD_DIR, 'index.html')
+
+@app.route('/dashboard/<path:filename>')
+def serve_dashboard_assets(filename):
+    """Serve dashboard static assets (CSS, JS)"""
+    return send_from_directory(DASHBOARD_DIR, filename)
+
+# --- ADDITIONAL API ENDPOINTS ---
+
+@app.route('/api/blocks', methods=['GET'])
+def list_blocks():
+    """List all active block events for the dashboard"""
+    blocks = BlockEvent.query.order_by(BlockEvent.blocked_at.desc()).all()
+    return jsonify([{
+        "id": b.id,
+        "ip": b.ip,
+        "reason": b.reason,
+        "blocked_at": b.blocked_at.isoformat() if b.blocked_at else None,
+        "expires_at": b.expires_at.isoformat() if b.expires_at else None
+    } for b in blocks])
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Read last N lines from audit.log for the terminal panel"""
+    limit = request.args.get('limit', 40, type=int)
+    log_path = os.path.join(basedir, 'audit.log')
+    lines = []
+    try:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            lines = [l.strip() for l in all_lines[-limit:] if l.strip()]
+    except FileNotFoundError:
+        lines = ['No audit.log file found yet.']
+    except Exception as e:
+        lines = [f'Error reading logs: {str(e)}']
+    return jsonify(lines)
+
 if __name__ == '__main__':
-    # Fail if certs are missing. No fallback to HTTP allowed.
-    app.run(host='0.0.0.0', port=5000, threaded=True, ssl_context=('cert.pem', 'key.pem'))
+    # Try SSL first; fall back to plain HTTP for dev/testing
+    ssl_ctx = None
+    cert_path = os.path.join(basedir, 'cert.pem')
+    key_path = os.path.join(basedir, 'key.pem')
+    if os.path.exists(cert_path) and os.path.exists(key_path):
+        ssl_ctx = (cert_path, key_path)
+        logger.info("Starting with SSL (cert.pem + key.pem)")
+    else:
+        logger.warning("SSL certs not found — starting in HTTP-only dev mode")
+    app.run(host='0.0.0.0', port=5000, threaded=True, ssl_context=ssl_ctx)
