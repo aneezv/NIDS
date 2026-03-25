@@ -107,6 +107,7 @@ def send_heartbeat():
             # Create the small JSON payload
             payload = {
                 "sensor_id": SENSOR_ID,
+                "status": "OK",
                 "cpu_load": CPU_LOAD
             }
             

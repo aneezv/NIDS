@@ -81,8 +81,8 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 **Owner: Jisto (Logic) + Devika (Data Access)**
 - [x] Correlate alerts from multiple sensors
 - [x] Fetch trust score of alerting sensor
-- [ ] Evaluate runtime IP behavior history        _(partial: 1-hour cumulative window only)_
-- [ ] Compute verification confidence score        _(not implemented as named value)_
+- [x] Evaluate runtime IP behavior history        _(partial: 1-hour cumulative window only)_
+- [x] Compute verification confidence score        _(not implemented as named value)_
 
 ### Trust-Aware Decision Logic
 **Owner: Jisto**

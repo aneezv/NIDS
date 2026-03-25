@@ -3,6 +3,7 @@ import threading
 import json
 import os
 from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
+from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
 from datetime import datetime 
 import secrets
 import ipaddress
