@@ -2,7 +2,7 @@ import logging
 import threading
 import json
 import os
-from models import db, SensorNode, Alert, BlockEvent
+from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
 from datetime import datetime 
 import secrets
 import ipaddress
@@ -315,6 +315,43 @@ def get_logs():
     except Exception as e:
         lines = [f'Error reading logs: {str(e)}']
     return jsonify(lines)
+
+@app.route('/api/verdicts', methods=['GET'])
+def list_verdicts():
+    """Last N verification verdicts — BLOCK, BORDERLINE, or UNVERIFIED.
+    Optional query params: ?limit=50&verdict=BORDERLINE
+    """
+    limit = request.args.get('limit', 50, type=int)
+    verdict_filter = request.args.get('verdict', None)
+
+    query = VerificationResult.query.order_by(VerificationResult.timestamp.desc())
+    if verdict_filter:
+        query = query.filter(VerificationResult.verdict == verdict_filter.upper())
+    results = query.limit(limit).all()
+
+    return jsonify([{
+        "id":          r.id,
+        "ip":          r.ip,
+        "score":       r.score,
+        "confidence":  r.confidence,
+        "verdict":     r.verdict,
+        "sensor_trust": r.sensor_trust,
+        "sensors":     r.sensors,
+        "timestamp":   r.timestamp.isoformat()
+    } for r in results])
+
+@app.route('/api/honeypot', methods=['GET'])
+def list_honeypot_queue():
+    """Returns unprocessed BORDERLINE IPs queued for honeypot verification."""
+    entries = HoneypotQueue.query.filter_by(processed=False).order_by(
+        HoneypotQueue.queued_at.desc()
+    ).all()
+    return jsonify([{
+        "id":        e.id,
+        "ip":        e.ip,
+        "score":     e.score,
+        "queued_at": e.queued_at.isoformat()
+    } for e in entries])
 
 if __name__ == '__main__':
     # Try SSL first; fall back to plain HTTP for dev/testing
