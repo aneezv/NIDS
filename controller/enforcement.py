@@ -23,28 +23,29 @@ def calculate_ban_duration(ip, app):
     else:
         return 86400    # 24 Hours (Maximum Penalty)
 
-def enforce_block(ip, threat_info, whitelist, app):
+def enforce_block(ip, threat_info, whitelist, app, duration=None):
     """Executes the actual firewall block using ipset/iptables"""
     if ip in whitelist:
         logger.warning(f"CRITICAL: Attempted to block Whitelisted IP {ip}. Action Aborted.")
-        return
+        return None
 
-    # 1. Calculate Duration
-    duration = calculate_ban_duration(ip, app)
+    # 1. Calculate Duration if not specified
+    if duration is None:
+        duration = calculate_ban_duration(ip, app)
 
     from models import BlockEvent
     offense_count = BlockEvent.query.filter_by(ip=ip).count()
 
-    logger.info(f"⚔️ BLOCKING {ip} for {duration} seconds (Offense #{offense_count + 1})")
+    logger.info(f"⚔️ BLOCKING {ip} for {duration if duration > 0 else 'permanent'} seconds (Offense #{offense_count + 1})")
 
     # 2. Pass duration to the script
     try:
         # Note: block_ip.sh must be in the same directory as the runner
         subprocess.run(["sudo", "./block_ip.sh", ip, str(duration)], check=True)
-        #  logger.info(f"called block_ip.sh for {ip} for {duration} seconds")
-
     except Exception as e:
         logger.error(f"Failed to execute block: {e}")
+        
+    return duration
 
 def remove_ban(ip):
     """Executes the actual firewall unblock using ipset/iptables"""

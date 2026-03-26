@@ -168,8 +168,14 @@ class VerificationEngine:
             elif total_threat > required_threshold:
                 # --- BLOCK ---
                 verdict = "BLOCK"
-                enforce_block(ip, {"score": total_threat}, self.config['WHITELIST'], self.app)
-                block_event = BlockEvent(ip=ip, reason=f"Threat Score: {total_threat:.2f}")
+                duration = enforce_block(ip, {"score": total_threat}, self.config['WHITELIST'], self.app)
+                
+                if duration and duration > 0:
+                    expires = datetime.utcnow() + timedelta(seconds=duration)
+                    block_event = BlockEvent(ip=ip, reason=f"Threat Score: {total_threat:.2f}", expires_at=expires)
+                else:
+                    block_event = BlockEvent(ip=ip, reason=f"Threat Score: {total_threat:.2f}")
+
                 db.session.add(block_event)
                 sensor.trust_score = min(100.0, sensor.trust_score + 5.0)
                 logger.info(f"[SYSTEM] [BLOCK] {ip} blocked (Score: {total_threat:.2f})")

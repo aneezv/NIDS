@@ -738,6 +738,7 @@ async function refreshActiveTab() {
         case 'settings':
             await Promise.allSettled([
                 fetchConfig(),
+                fetchNodes(),
             ]);
             break;
     }

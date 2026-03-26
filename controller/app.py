@@ -226,9 +226,10 @@ def block_ip_manual():
          logger.warning(f"[ADMIN] [BLOCK] Rejected: {ip} is whitelisted.")
          return jsonify({"error": f"Cannot block {ip} (Whitelisted)"}), 400
          
-    enforce_block(ip, {"score": 100.0}, whitelist, app)
+    # duration=0 for permanent blocks in ipset
+    enforce_block(ip, {"score": 100.0}, whitelist, app, duration=0)
     
-    # Record in database
+    # Record in database (expires_at gets None automatically = permanent)
     block_event = BlockEvent(ip=ip, reason=f"Manual Override Block")
     db.session.add(block_event)
     db.session.commit()
@@ -326,12 +327,12 @@ DASHBOARD_DIR = os.path.join(basedir, 'dashboard')
 @app.route('/dashboard')
 def serve_dashboard():
     """Serve the main dashboard page"""
-    return send_from_directory(DASHBOARD_DIR, 'index.html')
+    return send_from_directory(DASHBOARD_DIR, 'index.html', max_age=0)
 
 @app.route('/dashboard/<path:filename>')
 def serve_dashboard_assets(filename):
     """Serve dashboard static assets (CSS, JS)"""
-    return send_from_directory(DASHBOARD_DIR, filename)
+    return send_from_directory(DASHBOARD_DIR, filename, max_age=0)
 
 # --- ADDITIONAL API ENDPOINTS ---
 
