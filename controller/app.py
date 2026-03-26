@@ -147,6 +147,21 @@ def list_nodes():
         "last_seen": n.last_seen.isoformat() if n.last_seen else None
     } for n in nodes])
 
+# [NEW] Management API: Delete Node
+@app.route('/api/nodes/<sensor_id>', methods=['DELETE'])
+def delete_node(sensor_id):
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+    
+    node = SensorNode.query.get(sensor_id)
+    if not node:
+         return jsonify({"error": "Sensor not found"}), 404
+         
+    db.session.delete(node)
+    db.session.commit()
+    logger.info(f"[ADMIN] Deleted sensor {sensor_id}")
+    return jsonify({"status": "deleted", "id": sensor_id}), 200
+
 # [NEW] Management API: List Alerts
 @app.route('/api/alerts', methods=['GET'])
 def list_alerts():

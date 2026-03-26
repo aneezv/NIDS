@@ -6,6 +6,10 @@ import urllib3
 import json
 import threading
 import psutil
+import socket
+import urllib.parse
+import threading
+import psutil
 from collections import deque
 from dotenv import load_dotenv
 from features import parse_tshark_line
@@ -167,8 +171,33 @@ def model_watcher():
         time.sleep(300)  # Check every 5 minutes
 
 def monitor_traffic():
+    # Attempt to determine sensor IP (default to 127.0.0.1 on failure)
+    sensor_ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        sensor_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    # Attempt to determine controller IP (default to 127.0.0.1 on failure)
+    controller_ip = "127.0.0.1"
+    try:
+        host = urllib.parse.urlparse(CONTROLLER_URL).hostname
+        if host:
+            controller_ip = socket.gethostbyname(host)
+    except Exception:
+        pass
+
+    # BPF filter drops packets to/from the controller to prevent alert feedback loops.
+    # We do NOT drop the sensor's own IP otherwise it becomes blind to attacks against itself.
+    bpf_filter = f"not host {controller_ip}"
+    print(f"🌍 Resolved Sensor IP: {sensor_ip} | Resolved Controller IP: {controller_ip}")
+
     cmd = [
         "tshark", "-i", INTERFACE,
+        "-f", bpf_filter,
         "-T", "fields",
         "-e", "ip.src",
         "-e", "frame.len",
@@ -187,6 +216,10 @@ def monitor_traffic():
         batch_data = []
         batch_ips = []
         
+        # [NEW] Micro-Flow State Tracker
+        flow_state = {} # ip -> {'first_seen': float, 'pkts': int, 'bytes': int}
+        WINDOW_SIZE = 2.0
+        
         for line in process.stdout:
             src_ip, features = parse_tshark_line(line)
             
@@ -196,6 +229,35 @@ def monitor_traffic():
             # Whitelist Self/Router to avoid feedback loops
             if src_ip in WHITELIST: 
                 continue
+                
+            now = time.time()
+            frame_len = features[0]
+            
+            # [NEW] Flow logic update
+            if src_ip not in flow_state:
+                flow_state[src_ip] = {'first_seen': now, 'pkts': 0, 'bytes': 0}
+                
+            state = flow_state[src_ip]
+            state['pkts'] += 1
+            state['bytes'] += frame_len
+            
+            elapsed = now - state['first_seen']
+            
+            # Calculate rates. Force a minimum of 1.0s elapsed to prevent initial microsecond spikes.
+            effective_elapsed = max(elapsed, 1.0)
+            packet_rate = state['pkts'] / effective_elapsed
+            byte_rate = state['bytes'] / effective_elapsed
+            
+            # Reset window every 2 seconds
+            if elapsed >= WINDOW_SIZE:
+                state['first_seen'] = now
+                state['pkts'] = 0
+                state['bytes'] = 0
+                
+            # Append new flow features to packet features
+            # Old features: [frame_len, port, proto, flags]
+            # New features: [frame_len, port, proto, flags, packet_rate, byte_rate]
+            features.extend([packet_rate, byte_rate])
 
             batch_data.append(features)
             batch_ips.append(src_ip)
@@ -206,15 +268,15 @@ def monitor_traffic():
                 for i, (raw_score, conf) in enumerate(results):
                     if conf > 20:
                         ip = batch_ips[i]
-                        now = time.time()
+                        now_alert = time.time()
                         
-                        # Rate Limit (30s) per IP
-                        if ip in last_alert_time and (now - last_alert_time[ip] < 30):
+                        # Rate Limit (5s) per IP for demonstration
+                        if ip in last_alert_time and (now_alert - last_alert_time[ip] < 5):
                             continue
                         
                         print(f"🚨 Anomaly Detected: {ip} | Score: {raw_score:.4f} | Conf: {conf:.1f}")
                         send_alert(ip, conf)
-                        last_alert_time[ip] = now
+                        last_alert_time[ip] = now_alert
                 
                 batch_data = []
                 batch_ips = []

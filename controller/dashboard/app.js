@@ -66,6 +66,7 @@ const DOM = {
     trustThresholdRange:  document.getElementById('trust-threshold-range'),
     trustThresholdValue:  document.getElementById('trust-threshold-value'),
     btnSaveConfig:        document.getElementById('btn-save-config'),
+    sensorManagementList: document.getElementById('sensor-management-list'),
 
     // Sidebar
     sidebar:         document.getElementById('sidebar'),
@@ -197,6 +198,9 @@ async function fetchNodes() {
         const nodes = await apiFetch('/api/nodes');
         DOM.sensorCountBadge.textContent = `${nodes.length} nodes`;
         renderSensors(nodes);
+        if (typeof renderSensorSettings === 'function') {
+            renderSensorSettings(nodes);
+        }
     } catch { /* silently retry */ }
 }
 
@@ -434,6 +438,34 @@ function renderSettings(config) {
     }
 }
 
+function renderSensorSettings(nodes) {
+    if (!DOM.sensorManagementList) return;
+    
+    if (nodes.length === 0) {
+        DOM.sensorManagementList.innerHTML = '<span class="text-xs text-slate-500">No sensors registered</span>';
+        return;
+    }
+
+    DOM.sensorManagementList.innerHTML = nodes.map(n => {
+        const isOffline = n.status === 'offline';
+        const statusColor = isOffline ? 'text-red-400' : 'text-emerald-400';
+        return `
+            <div class="flex items-center justify-between p-3 rounded-lg bg-slate-800 border border-white/5">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm">${escapeHtml(n.id)}</span>
+                        <span class="text-[0.65rem] ${statusColor} uppercase px-1.5 py-0.5 rounded border ${isOffline ? 'border-red-500/20 bg-red-500/10' : 'border-emerald-500/20 bg-emerald-500/10'}">${n.status}</span>
+                    </div>
+                    <div class="text-xs font-mono text-slate-500 mt-1">${escapeHtml(n.ip || '—')}</div>
+                </div>
+                <button onclick="doDeleteSensor('${escapeHtml(n.id)}')" class="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors" title="Delete Sensor">
+                    <span class="material-symbols-outlined text-lg">delete</span>
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
 // ============================================================
 //  ACTIONS
 // ============================================================
@@ -536,6 +568,18 @@ async function doSaveConfig() {
         showToast('Configuration saved', 'success');
     } catch (err) {
         showToast(`Failed to save config: ${err.message}`, 'error');
+    }
+}
+
+async function doDeleteSensor(sensorId) {
+    if (!confirm(`Are you sure you want to delete sensor '${sensorId}'?`)) return;
+    
+    try {
+        await apiAuthFetch(`/api/nodes/${encodeURIComponent(sensorId)}`, {}, 'DELETE');
+        showToast(`Deleted sensor '${sensorId}'`, 'success');
+        refreshActiveTab();
+    } catch (err) {
+        showToast(`Failed to delete sensor: ${err.message}`, 'error');
     }
 }
 

@@ -2,8 +2,8 @@
     "sensor_id": "sensor_01",
     "controller_url": "https://controller.local:5000/alert",
     "interface": "eth0",
-    "threshold": 0.10,
-    "model_path": "model.pkl",
+    "threshold": 0.083,
+    "model_path": "model_advanced.pkl",
     "batch_size": 10,
     "whitelist": [
         "127.0.0.1",
@@ -11,5 +11,5 @@
         "10.0.0.50"
     ],
     "cert_path": "rootCA.pem",
-    "API_KEY" : "secure-research-demo-key-123"
+    "API_KEY": "secure-research-demo-key-123"
 }
