@@ -14,6 +14,13 @@ from collections import deque
 from dotenv import load_dotenv
 from features import parse_tshark_line
 from detector import AnomalyDetector
+import builtins
+
+# --- LOGGING SETUP ---
+_original_print = builtins.print
+def _timestamped_print(*args, **kwargs):
+    _original_print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
+builtins.print = _timestamped_print
 
 # --- CONFIGURATION ---
 with open("config.json") as config :
@@ -181,19 +188,26 @@ def monitor_traffic():
     except Exception:
         pass
 
-    # Attempt to determine controller IP (default to 127.0.0.1 on failure)
+    # Attempt to determine controller IP and Port
     controller_ip = "127.0.0.1"
+    controller_port = 5000
     try:
-        host = urllib.parse.urlparse(CONTROLLER_URL).hostname
-        if host:
-            controller_ip = socket.gethostbyname(host)
+        parsed = urllib.parse.urlparse(CONTROLLER_URL)
+        if parsed.hostname:
+            controller_ip = socket.gethostbyname(parsed.hostname)
+        if parsed.port:
+            controller_port = parsed.port
+        elif parsed.scheme == "https":
+            controller_port = 443
+        elif parsed.scheme == "http":
+            controller_port = 80
     except Exception:
         pass
 
-    # BPF filter drops packets to/from the controller to prevent alert feedback loops.
-    # We do NOT drop the sensor's own IP otherwise it becomes blind to attacks against itself.
-    bpf_filter = f"not host {controller_ip}"
-    print(f"🌍 Resolved Sensor IP: {sensor_ip} | Resolved Controller IP: {controller_ip}")
+    # BPF filter drops packets to/from the controller API to prevent alert feedback loops.
+    # By using 'and port', attacks originating from the controller machine are still detected!
+    bpf_filter = f"not (host {controller_ip} and port {controller_port})"
+    print(f"🌍 Resolved Sensor IP: {sensor_ip} | Controller: {controller_ip}:{controller_port}")
 
     cmd = [
         "tshark", "-i", INTERFACE,
@@ -270,8 +284,8 @@ def monitor_traffic():
                         ip = batch_ips[i]
                         now_alert = time.time()
                         
-                        # Rate Limit (5s) per IP for demonstration
-                        if ip in last_alert_time and (now_alert - last_alert_time[ip] < 5):
+                        # Rate Limit (8.5s) per IP for demonstration
+                        if ip in last_alert_time and (now_alert - last_alert_time[ip] < 8.5):
                             continue
                         
                         print(f"🚨 Anomaly Detected: {ip} | Score: {raw_score:.4f} | Conf: {conf:.1f}")

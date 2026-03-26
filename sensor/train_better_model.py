@@ -1,95 +1,253 @@
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import RobustScaler
+from sklearn.pipeline import Pipeline
 import joblib
 
-print("🧪 Generating synthetic dataset for high-speed clients (Gigabit Downloads, 4K Video)...")
+print("🧪 Generating realistic synthetic dataset...")
 
-# 1. High-Speed Downloads (Steam, Large Files)
-# Up to 50k pkts/sec, MTU size packets (1500), mostly ACK (0x10) flags
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX 1: Feature order is [frame_len, port, proto, flags, packet_rate, byte_rate]
+#         We use a Pipeline(RobustScaler → IsolationForest) so the scaler is
+#         baked into the saved model. The AnomalyDetector loads .pkl and calls
+#         predict/decision_function — both will now auto-scale. No changes needed
+#         to verify_model.py or detector.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+rng = np.random.default_rng(42)
+
+# ── 1. High-Speed Downloads (Steam, large files via HTTP/HTTPS) ───────────────
+#    Real: MTU-sized packets, high ACK rate, sustained throughput up to ~125 MB/s
 n_dl = 15000
-dl_data = {
-    'frame.len': np.random.choice([1400, 1500], n_dl),
-    'port': np.random.choice([80, 443, 27015], n_dl), # HTTP, HTTPS, Steam
-    'ip.proto': [6] * n_dl,
-    'tcp.flags': [0x10] * n_dl, # ACK
-    'packet_rate': np.random.uniform(1000, 50000, n_dl),
-    'byte_rate': np.random.uniform(1500000, 75000000, n_dl) # Up to 75 MB/s
+dl = {
+    'frame_len':   rng.choice([1400, 1500], n_dl),
+    'port':        rng.choice([80, 443, 27015], n_dl),
+    'proto':       np.full(n_dl, 6),
+    'flags':       np.full(n_dl, 0x10),           # ACK
+    'packet_rate': rng.uniform(1000, 50000, n_dl),
+    'byte_rate':   rng.uniform(1_500_000, 100_000_000, n_dl),  # up to 100 MB/s
 }
 
-# 2. 4K Streaming / YouTube (QUIC UDP or TCP)
-n_stream = 10000
-stream_data = {
-    'frame.len': np.random.choice([1200, 1400, 1500], n_stream),
-    'port': [443] * n_stream,
-    'ip.proto': np.random.choice([6, 17], n_stream, p=[0.5, 0.5]),
-    'tcp.flags': np.random.choice([0x10, 0], n_stream, p=[0.5, 0.5]),
-    'packet_rate': np.random.uniform(500, 5000, n_stream),
-    'byte_rate': np.random.uniform(600000, 7500000, n_stream) # Up to 7.5 MB/s
+# ── 2. 4K Streaming / YouTube (QUIC or TCP) ──────────────────────────────────
+#    Real: 15–25 Mbps sustained, bursty around segment boundaries
+n_st = 10000
+st = {
+    'frame_len':   rng.choice([1200, 1400, 1500], n_st),
+    'port':        np.full(n_st, 443),
+    'proto':       rng.choice([6, 17], n_st, p=[0.5, 0.5]),
+    'flags':       rng.choice([0x10, 0], n_st, p=[0.5, 0.5]),
+    'packet_rate': rng.uniform(500, 5000, n_st),
+    'byte_rate':   rng.uniform(600_000, 8_000_000, n_st),  # up to ~8 MB/s (64 Mbps)
 }
 
-# 3. Gaming (Low latency UDP, steady packet rate, very low byte rate)
+# ── 3. Web Browsing (FIXED: wider ranges for page-load bursts) ────────────────
+#    FIX: Old code capped at packet_rate=500, byte_rate=750 KB/s.
+#    Real: a modern page (React SPA, images, fonts) can burst 1,000–3,000 pps
+#    and 5–15 MB/s during the initial load, then idle at almost zero.
+#    We model both phases so the model learns the full realistic envelope.
+n_web_burst = 8000   # initial page load (high burst)
+n_web_idle  = 8000   # after load (nearly idle)
+
+web_burst = {
+    'frame_len':   rng.choice([60, 512, 1000, 1500], n_web_burst, p=[0.1, 0.35, 0.3, 0.25]),
+    'port':        rng.choice(
+                       list(np.full(600, 443)) +
+                       list(np.full(200, 80)) +
+                       list(rng.integers(30000, 65000, 200)),
+                       n_web_burst),
+    'proto':       np.full(n_web_burst, 6),
+    'flags':       rng.choice([0x10, 0x18, 0x02], n_web_burst, p=[0.6, 0.3, 0.1]),
+    'packet_rate': rng.uniform(200, 3000, n_web_burst),    # burst phase
+    'byte_rate':   rng.uniform(100_000, 15_000_000, n_web_burst),
+}
+
+web_idle = {
+    'frame_len':   rng.choice([60, 128, 256], n_web_idle, p=[0.5, 0.3, 0.2]),
+    'port':        rng.choice([443, 80], n_web_idle),
+    'proto':       np.full(n_web_idle, 6),
+    'flags':       rng.choice([0x10, 0x18], n_web_idle, p=[0.8, 0.2]),
+    'packet_rate': rng.uniform(1, 50, n_web_idle),         # nearly idle
+    'byte_rate':   rng.uniform(100, 50_000, n_web_idle),
+}
+
+# ── 4. DNS Queries (NEW — was completely missing before) ──────────────────────
+#    FIX: Missing DNS caused any DNS-heavy browsing session to be anomalous.
+#    Real: tiny UDP packets to port 53, very low rate
+n_dns = 5000
+dns = {
+    'frame_len':   rng.choice([60, 64, 80, 128], n_dns),
+    'port':        np.full(n_dns, 53),
+    'proto':       np.full(n_dns, 17),  # UDP
+    'flags':       np.zeros(n_dns),
+    'packet_rate': rng.uniform(0.5, 50, n_dns),   # typical: 1–20 queries/sec
+    'byte_rate':   rng.uniform(30, 6400, n_dns),
+}
+
+# ── 5. HTTPS Handshakes (NEW — TLS ClientHello, SYN/SYN-ACK bursts) ──────────
+#    FIX: Opening a browser fires dozens of TLS handshakes simultaneously.
+#    Each is a short burst of SYN + small packets before ACK-only data flow.
+n_tls = 6000
+tls = {
+    'frame_len':   rng.choice([40, 64, 128, 300], n_tls, p=[0.2, 0.3, 0.3, 0.2]),
+    'port':        np.full(n_tls, 443),
+    'proto':       np.full(n_tls, 6),
+    'flags':       rng.choice([0x02, 0x12, 0x10, 0x18], n_tls, p=[0.3, 0.2, 0.3, 0.2]),
+    'packet_rate': rng.uniform(5, 300, n_tls),
+    'byte_rate':   rng.uniform(200, 120_000, n_tls),
+}
+
+# ── 6. Online Gaming (UDP, low latency, steady) ───────────────────────────────
 n_game = 10000
-game_data = {
-    'frame.len': np.random.choice([64, 128, 256], n_game),
-    'port': np.random.randint(10000, 30000, n_game),
-    'ip.proto': [17] * n_game,
-    'tcp.flags': [0] * n_game,
-    'packet_rate': np.random.uniform(20, 100, n_game),
-    'byte_rate': np.random.uniform(1200, 25000, n_game)
+game = {
+    'frame_len':   rng.choice([64, 128, 256], n_game),
+    'port':        rng.integers(10000, 30000, n_game),
+    'proto':       np.full(n_game, 17),
+    'flags':       np.zeros(n_game),
+    'packet_rate': rng.uniform(20, 128, n_game),
+    'byte_rate':   rng.uniform(1200, 32_768, n_game),
 }
 
-# 4. Standard Web Browsing (Bursty TCP traffic, high ports, mixed sizes)
-n_web = 10000
-web_data = {
-    'frame.len': np.random.choice([60, 512, 1000, 1500], n_web, p=[0.1, 0.4, 0.3, 0.2]),
-    'port': np.random.choice([443, 80] + list(np.random.randint(30000, 65000, 1000)), n_web),
-    'ip.proto': [6] * n_web,
-    'tcp.flags': np.random.choice([0x10, 0x18], n_web, p=[0.7, 0.3]),
-    'packet_rate': np.random.uniform(5, 500, n_web),
-    'byte_rate': np.random.uniform(300, 750000, n_web)
-}
-
-# 5. Standard ICMP (Ping)
+# ── 7. Normal ICMP (ping / traceroute) ───────────────────────────────────────
 n_ping = 2000
-ping_data = {
-    'frame.len': [64] * n_ping,
-    'port': [0] * n_ping,
-    'ip.proto': [1] * n_ping,
-    'tcp.flags': [0] * n_ping,
-    'packet_rate': np.random.uniform(0.5, 5, n_ping),
-    'byte_rate': np.random.uniform(32, 320, n_ping)
+ping = {
+    'frame_len':   np.full(n_ping, 64),
+    'port':        np.zeros(n_ping),
+    'proto':       np.full(n_ping, 1),
+    'flags':       np.zeros(n_ping),
+    'packet_rate': rng.uniform(0.5, 10, n_ping),
+    'byte_rate':   rng.uniform(32, 640, n_ping),
 }
 
-# 6. Volumetric Noise Bounds
-n_noise = 2500
-noise_data = {
-    'frame.len': np.random.randint(0, 2000, n_noise),
-    'port': np.random.randint(0, 65535, n_noise),
-    'ip.proto': np.random.randint(0, 255, n_noise),
-    'tcp.flags': np.random.randint(0, 255, n_noise),
-    'packet_rate': np.random.uniform(0, 100000, n_noise), 
-    'byte_rate': np.random.uniform(0, 150000000, n_noise) 
+# ── 8. Background System Traffic (NTP, SSDP, DHCP, ARP) ──────────────────────
+#    FIX: Completely missing — Windows/macOS/Linux send this constantly.
+n_sys = 3000
+sys_bg = {
+    'frame_len':   rng.choice([60, 64, 128, 300], n_sys, p=[0.3, 0.3, 0.2, 0.2]),
+    'port':        rng.choice([123, 1900, 5353, 67, 68], n_sys),  # NTP/SSDP/mDNS/DHCP
+    'proto':       rng.choice([17, 1], n_sys, p=[0.85, 0.15]),
+    'flags':       np.zeros(n_sys),
+    'packet_rate': rng.uniform(0.01, 5, n_sys),
+    'byte_rate':   rng.uniform(1, 1500, n_sys),
 }
 
-df_dl = pd.DataFrame(dl_data)
-df_stream = pd.DataFrame(stream_data)
-df_game = pd.DataFrame(game_data)
-df_web = pd.DataFrame(web_data)
-df_ping = pd.DataFrame(ping_data)
-df_noise = pd.DataFrame(noise_data)
+# ─────────────────────────────────────────────────────────────────────────────
+# ATTACK / ANOMALY DATA
+# FIX: Old noise was pure uniform random — it overlapped with legitimate traffic
+# everywhere. Real attacks have distinctive signatures. We model them explicitly
+# so the model learns a clean boundary.
+# ─────────────────────────────────────────────────────────────────────────────
 
-df = pd.concat([df_dl, df_stream, df_game, df_web, df_ping, df_noise], ignore_index=True)
+# ── A. ICMP Flood (hping3 -1 --flood) ────────────────────────────────────────
+n_icmpfl = 1000
+icmp_flood = {
+    'frame_len':   np.full(n_icmpfl, 64),
+    'port':        np.zeros(n_icmpfl),
+    'proto':       np.full(n_icmpfl, 1),
+    'flags':       np.zeros(n_icmpfl),
+    'packet_rate': rng.uniform(3000, 100000, n_icmpfl),   # 3k–100k pps
+    'byte_rate':   rng.uniform(192_000, 6_400_000, n_icmpfl),
+}
+
+# ── B. TCP SYN Flood ─────────────────────────────────────────────────────────
+n_synfl = 1000
+syn_flood = {
+    'frame_len':   rng.choice([40, 60], n_synfl),
+    'port':        rng.integers(1, 1024, n_synfl),   # attacks target well-known ports
+    'proto':       np.full(n_synfl, 6),
+    'flags':       np.full(n_synfl, 0x02),           # SYN only
+    'packet_rate': rng.uniform(1000, 80000, n_synfl),
+    'byte_rate':   rng.uniform(40_000, 4_800_000, n_synfl),
+}
+
+# ── C. UDP Flood ─────────────────────────────────────────────────────────────
+n_udpfl = 1000
+udp_flood = {
+    'frame_len':   rng.choice([64, 512, 1500], n_udpfl),
+    'port':        rng.integers(1, 65535, n_udpfl),
+    'proto':       np.full(n_udpfl, 17),
+    'flags':       np.zeros(n_udpfl),
+    'packet_rate': rng.uniform(2000, 100000, n_udpfl),
+    'byte_rate':   rng.uniform(128_000, 150_000_000, n_udpfl),
+}
+
+# ── D. HTTP/HTTPS Application Layer Flood ────────────────────────────────────
+n_httpfl = 800
+http_flood = {
+    'frame_len':   rng.choice([1400, 1500], n_httpfl),
+    'port':        rng.choice([80, 443], n_httpfl),
+    'proto':       np.full(n_httpfl, 6),
+    'flags':       np.full(n_httpfl, 0x18),  # PSH+ACK
+    'packet_rate': rng.uniform(2000, 30000, n_httpfl),
+    'byte_rate':   rng.uniform(2_800_000, 45_000_000, n_httpfl),
+}
+
+# ── E. Port Scans (distinctive: SYN to weird ports, low byte rate) ────────────
+n_scan = 1200
+scan = {
+    'frame_len':   rng.choice([40, 44, 60], n_scan),
+    'port':        rng.choice(
+                       list(rng.integers(1, 1024, 400)) +       # well-known
+                       list(rng.integers(1024, 49152, 400)) +   # registered
+                       list([445, 3389, 22, 23, 6667, 4444, 1433, 3306]),
+                       n_scan),
+    'proto':       np.full(n_scan, 6),
+    'flags':       np.full(n_scan, 0x02),   # SYN (stealth scan)
+    'packet_rate': rng.uniform(1, 500, n_scan),
+    'byte_rate':   rng.uniform(40, 30_000, n_scan),
+}
+
+# ── F. DNS Amplification Attack ───────────────────────────────────────────────
+n_dnsamp = 600
+dns_amp = {
+    'frame_len':   rng.choice([512, 1000, 1500], n_dnsamp),  # large DNS responses
+    'port':        np.full(n_dnsamp, 53),
+    'proto':       np.full(n_dnsamp, 17),
+    'flags':       np.zeros(n_dnsamp),
+    'packet_rate': rng.uniform(500, 10000, n_dnsamp),
+    'byte_rate':   rng.uniform(256_000, 15_000_000, n_dnsamp),
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Assemble and train
+# ─────────────────────────────────────────────────────────────────────────────
+
+frames_normal = [dl, st, web_burst, web_idle, dns, tls, game, ping, sys_bg]
+frames_attack = [icmp_flood, syn_flood, udp_flood, http_flood, scan, dns_amp]
+
+df_normal = pd.concat([pd.DataFrame(f) for f in frames_normal], ignore_index=True)
+df_attack = pd.concat([pd.DataFrame(f) for f in frames_attack], ignore_index=True)
+df = pd.concat([df_normal, df_attack], ignore_index=True)
 df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-clf = IsolationForest(
-    n_estimators=200, 
-    max_samples=1000, 
-    contamination=len(df_noise)/len(df),
-    random_state=42, 
-    n_jobs=-1
-)
+# Ensure column order matches verify_model.py: [frame_len, port, proto, flags, packet_rate, byte_rate]
+feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate']
+df = df[feature_cols]
 
-clf.fit(df)
-joblib.dump(clf, "model_advanced.pkl")
-print("✅ High-Speed Commercial NetFlow Model saved!")
+contamination = len(df_attack) / len(df)
+print(f"   Normal samples : {len(df_normal):,}")
+print(f"   Attack samples : {len(df_attack):,}")
+print(f"   Contamination  : {contamination:.3f} ({contamination*100:.1f}%)")
+
+# FIX: Pipeline = RobustScaler (handles outliers better than Standard) + IsolationForest
+#      The scaler is now INSIDE the model — verify_model.py loads it transparently.
+pipeline = Pipeline([
+    ('scaler', RobustScaler()),           # normalises each feature independently
+    ('clf', IsolationForest(
+        n_estimators=300,
+        max_samples=1024,
+        contamination=contamination,
+        random_state=42,
+        n_jobs=-1,
+    )),
+])
+
+print("\n🔧 Training pipeline (RobustScaler + IsolationForest)...")
+pipeline.fit(df)
+
+output_path = "model_advanced.pkl"
+joblib.dump(pipeline, output_path)
+print(f"✅ Model saved to {output_path}")
+print("\nNOTE: If your AnomalyDetector calls clf.decision_function() or clf.score_samples()")
+print("      directly, update it to call pipeline.decision_function() / pipeline.score_samples().")
+print("      If it calls pipeline.predict() it will work unchanged.")

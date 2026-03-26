@@ -65,6 +65,25 @@ class VerificationEngine:
             dict: { ip, score, confidence, verdict, sensor_trust, sensors }
         """
         with self.app.app_context():
+            # ------------------------------------------------------------------
+            # 0. Fast-path: Ignore if already blocked
+            # ------------------------------------------------------------------
+            now = datetime.utcnow()
+            existing_block = BlockEvent.query.filter(
+                BlockEvent.ip == ip,
+                (BlockEvent.expires_at == None) | (BlockEvent.expires_at > now)
+            ).first()
+            
+            if existing_block:
+                logger.debug(f"[SYSTEM] Ignoring alert for {ip} - IP is already blocked.")
+                return {
+                    "ip": ip,
+                    "score": round(raw_score, 2),
+                    "confidence": 100.0,
+                    "verdict": "ALREADY_BLOCKED",
+                    "sensor_trust": 0.0,
+                    "sensors": 1
+                }
 
             # ------------------------------------------------------------------
             # 1. Init sensor if new (default trust = 50.0)

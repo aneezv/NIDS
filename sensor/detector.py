@@ -8,7 +8,7 @@ class AnomalyDetector:
         print(f"🧠 Loading Model from {model_path} (Threshold: {threshold})...")
         self.model = joblib.load(model_path)
         self.model_path = model_path
-        self.feature_cols = ['frame.len', 'port', 'ip.proto', 'tcp.flags', 'packet_rate', 'byte_rate']
+        self.feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate']
         self.threshold = threshold
 
     def normalize_score(self, anomaly_score):
