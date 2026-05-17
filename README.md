@@ -55,28 +55,68 @@ NIDS/
 ## 🚀 Getting Started
 
 ### Prerequisites
-*   Python 3.8+
-*   Admin/Root privileges (for packet capture and iptables)
+*   Python 3.10+
+*   Linux on the sensor and router VMs (tshark, ipset, iptables)
+*   Root/sudo on the sensor (for packet capture) and the router (for ipset/iptables)
 
 ### 1. Setup the Controller
-The Controller manages alerts and enforcement.
 
 ```bash
 cd controller
 pip install -r requirements.txt
-# Configure environment variables if needed
-python controller.py
+
+# Set the shared API key — the same value also goes in sensor/.env
+echo "API_KEY=<your-secret-key>" > .env
+
+# Initialise / migrate the SQLite database (idempotent — safe to re-run)
+python setup_db.py
+
+# Start the controller
+python app.py
 ```
 
-### 2. Setup a Sensor
-Sensors run on network nodes to monitor traffic.
+The dashboard is served at `http://<controller-host>:5000/dashboard`. The API key
+is injected into the page from `.env` — it is never hardcoded in the JS bundle.
+
+### 2. Train the model (one-time)
 
 ```bash
 cd sensor
 pip install -r requirements.txt
-# Edit config.json to point to your Controller IP
-python sensor.py
+python train.py             # writes model_advanced.pkl
+python verify_model.py      # sanity-check the model on canned inputs
 ```
+
+`train.py` is the only canonical trainer. The alternative trainers in
+`sensor/experimental/` are kept for reference only — see that folder's README.
+
+### 3. Setup a Sensor
+
+```bash
+cd sensor
+
+# Same API key as the controller
+echo "API_KEY=<your-secret-key>" > .env
+
+# Edit config.json:
+#   - controller_url        : URL of your controller's /alert endpoint
+#   - interface             : NIC to sniff (e.g. eth0)
+#   - sensor_id             : unique name per sensor node
+#   - cert_path             : path to the controller's TLS cert, if using HTTPS
+sudo python sensor.py
+```
+
+### 4. (Optional) Run an attack rehearsal
+
+```bash
+cd attacker
+./prepare_attack.sh         # adjust ROUTER_IP at the top first
+# then run hping3 / nmap from this host
+```
+
+Watch the dashboard: the sensor sends alerts → the controller computes a
+verification score → if confidence exceeds the threshold the router blocks
+the IP via ipset, time-limited and reversible.
 
 ## 👥 Contributors
 

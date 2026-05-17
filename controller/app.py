@@ -420,23 +420,41 @@ def list_honeypot_queue():
         "queued_at": e.queued_at.isoformat()
     } for e in entries])
 
-# --- BACKGROUND MAINTENANCE THREAD (D2 + D3) ---
+# --- BACKGROUND MAINTENANCE THREAD ---
 from datetime import timedelta
 import time
+
+# Honeypot follow-up window: borderline IPs are "evaluated" after this many
+# seconds and the queue entry is marked processed. Real honeypot integration
+# would replace this stub with an actual probe.
+HONEYPOT_EVAL_SECONDS = 60
+
+# Trust decay pulls each sensor's trust score 1% closer to the default (50)
+# every hour. Without it, a sensor that was correct once stays trusted
+# forever, and a sensor that was wrong once is penalised forever.
+TRUST_DECAY_INTERVAL_SECONDS = 3600
+TRUST_DEFAULT = 50.0
+TRUST_DECAY_FACTOR = 0.01
+
+_last_trust_decay = 0.0
 
 def background_maintenance():
     """
     Runs every 15 seconds in a daemon thread:
-      D2 — Marks sensors as 'offline' if last_seen > 30 seconds ago.
-      D3 — Deletes expired BlockEvent records and lifts their firewall bans.
+      - Marks sensors as 'offline' if last_seen > 30 seconds ago.
+      - Deletes expired BlockEvent records and lifts their firewall bans.
+      - Stub-processes the HoneypotQueue: anything older than
+        HONEYPOT_EVAL_SECONDS is marked processed.
+      - Once per hour, applies a small trust decay to every sensor.
     """
+    global _last_trust_decay
     while True:
         time.sleep(15)
         try:
             with app.app_context():
                 now = datetime.utcnow()
+                wall = time.time()
 
-                # --- D2: Sensor Offline Detection ---
                 cutoff = now - timedelta(seconds=30)
                 stale_sensors = SensorNode.query.filter(
                     SensorNode.last_seen < cutoff,
@@ -449,7 +467,6 @@ def background_maintenance():
                         f"(last seen: {node.last_seen})"
                     )
 
-                # --- D3: BlockEvent Expiry Cleanup ---
                 expired_blocks = BlockEvent.query.filter(
                     BlockEvent.expires_at != None,
                     BlockEvent.expires_at < now
@@ -461,6 +478,33 @@ def background_maintenance():
                     )
                     remove_ban(block.ip)
                     db.session.delete(block)
+
+                # Honeypot stub: borderline IPs that have been queued long
+                # enough are marked processed. The verdict was inconclusive;
+                # we're recording that we looked and moved on. A real
+                # honeypot would write evidence back here.
+                honeypot_cutoff = now - timedelta(seconds=HONEYPOT_EVAL_SECONDS)
+                stale_honeypot = HoneypotQueue.query.filter(
+                    HoneypotQueue.processed == False,
+                    HoneypotQueue.queued_at < honeypot_cutoff
+                ).all()
+                for entry in stale_honeypot:
+                    entry.processed = True
+                    logger.info(
+                        f"[HONEYPOT] {entry.ip} evaluated, no follow-up "
+                        f"(score: {entry.score:.2f})"
+                    )
+
+                # Hourly trust decay
+                if wall - _last_trust_decay >= TRUST_DECAY_INTERVAL_SECONDS:
+                    _last_trust_decay = wall
+                    sensors = SensorNode.query.all()
+                    for node in sensors:
+                        delta = (TRUST_DEFAULT - node.trust_score) * TRUST_DECAY_FACTOR
+                        if abs(delta) >= 0.01:
+                            node.trust_score = max(0.0, min(100.0, node.trust_score + delta))
+                    if sensors:
+                        logger.info(f"[MAINTENANCE] Trust decay applied to {len(sensors)} sensors")
 
                 db.session.commit()
         except Exception as e:
