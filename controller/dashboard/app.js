@@ -181,7 +181,7 @@ async function fetchStatus() {
         animateNumber(DOM.kpiSensors, data.active_sensors || 0);
         animateNumber(DOM.kpiAlerts, data.total_alerts || 0);
         animateNumber(DOM.kpiBlocks, data.active_blocks || 0);
-    } catch { /* silently retry next poll */ }
+    } catch (err) { console.warn('[poll] /api/status failed:', err.message); }
 }
 
 async function fetchAlerts() {
@@ -189,7 +189,7 @@ async function fetchAlerts() {
         const alerts = await apiFetch(`/api/alerts?limit=${CONFIG.ALERT_LIMIT}`);
         DOM.alertCountBadge.textContent = `${alerts.length} alerts`;
         renderAlerts(alerts);
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /api/alerts failed:', err.message); }
 }
 
 async function fetchNodes() {
@@ -200,7 +200,7 @@ async function fetchNodes() {
         if (typeof renderSensorSettings === 'function') {
             renderSensorSettings(nodes);
         }
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /api/nodes failed:', err.message); }
 }
 
 async function fetchTrust() {
@@ -215,7 +215,7 @@ async function fetchTrust() {
             DOM.kpiTrust.textContent = 'N/A';
             DOM.kpiTrustBar.style.width = '0%';
         }
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /trust failed:', err.message); }
 }
 
 async function fetchBlocks() {
@@ -223,21 +223,21 @@ async function fetchBlocks() {
         const blocks = await apiFetch('/api/blocks');
         DOM.blockCountBadge.textContent = `${blocks.length} IPs`;
         renderBlocks(blocks);
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /api/blocks failed:', err.message); }
 }
 
 async function fetchLogs() {
     try {
         const logs = await apiFetch(`/api/logs?limit=${CONFIG.LOG_LIMIT}`);
         renderLogs(logs);
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /api/logs failed:', err.message); }
 }
 
 async function fetchHoneypot() {
     try {
         const entries = await apiFetch('/api/honeypot');
         animateNumber(DOM.kpiHoneypot, entries.length);
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /api/honeypot failed:', err.message); }
 }
 
 async function fetchVerdicts() {
@@ -247,7 +247,7 @@ async function fetchVerdicts() {
         const verdicts = await apiFetch(`/api/verdicts${qs}`);
         DOM.verdictCountBadge.textContent = `${verdicts.length} verdicts`;
         renderVerdicts(verdicts);
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /api/verdicts failed:', err.message); }
 }
 
 async function fetchConfig() {
@@ -255,7 +255,7 @@ async function fetchConfig() {
         const config = await apiAuthGet('/config');
         currentConfig = config;
         renderSettings(config);
-    } catch { /* silently retry */ }
+    } catch (err) { console.warn('[poll] /config failed:', err.message); }
 }
 
 // ============================================================

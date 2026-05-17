@@ -5,7 +5,7 @@ import datetime
 
 class AnomalyDetector:
     def __init__(self, model_path="model_advanced.pkl", threshold=0.10):
-        print(f"🧠 Loading Model from {model_path} (Threshold: {threshold})...")
+        print(f"[detector] Loading model from {model_path} (threshold: {threshold})...")
         self.model = joblib.load(model_path)
         self.model_path = model_path
         self.feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate']
@@ -47,7 +47,7 @@ class AnomalyDetector:
         """
         self.model = joblib.load(new_path)
         self.model_path = new_path
-        print(f"🔄 Model reloaded: {new_path}")
+        print(f"[detector] Model reloaded: {new_path}")
 
     def predict_batch(self, batch_features):
         """

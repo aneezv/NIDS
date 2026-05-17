@@ -1,12 +1,21 @@
 #!/bin/bash
+#
+# Adds a route to the hidden 10.0.0.0/24 victim network via the router.
+#
+# Resolution order for the router IP:
+#   1. First positional argument:   ./prepare_attack.sh 192.168.1.10
+#   2. ROUTER_IP environment var:   ROUTER_IP=192.168.1.10 ./prepare_attack.sh
+#   3. Built-in default below       (only valid on the original lab setup)
 
-# REPLACE THIS WITH YOUR ROUTER'S EXTERNAL IP (Run 'ip a' on Router to find it)
-ROUTER_IP="192.168.16.42" 
+ROUTER_IP="${1:-${ROUTER_IP:-192.168.16.42}}"
 
-echo "⚔️  PREPARING ATTACK ROUTE..."
+if [[ -z "$ROUTER_IP" ]]; then
+    echo "ERROR: ROUTER_IP not set. Pass as an argument or export ROUTER_IP." >&2
+    exit 1
+fi
 
-# Add route to reach the hidden 10.0.0.x network via the Router
-sudo ip route add 10.0.0.0/24 via $ROUTER_IP 2>/dev/null
+echo "[*] PREPARING ATTACK ROUTE via $ROUTER_IP ..."
+sudo ip route add 10.0.0.0/24 via "$ROUTER_IP" 2>/dev/null
 
-echo "✅ Route added. You can now attack 10.0.0.50"
-echo "   Try: ping 10.0.0.50"
+echo "[+] Route added. You can now attack 10.0.0.50"
+echo "    Try: ping 10.0.0.50"

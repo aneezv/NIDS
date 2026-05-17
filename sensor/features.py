@@ -17,7 +17,7 @@ def parse_tshark_line(line):
                 # Handle empty strings or hex values
                 if not v: return 0
                 return int(v, 0)
-            except:
+            except (ValueError, TypeError):
                 return 0
 
         # Smart Port Logic: Summing TCP and UDP ports as one will always be 0

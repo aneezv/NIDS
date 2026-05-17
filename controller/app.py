@@ -271,13 +271,20 @@ def whitelist_ip():
     
     if ip not in CONFIG['WHITELIST']:
         CONFIG['WHITELIST'].append(ip)
-        # Optional: Save back to config.json here if persistence is needed
+        # Persist to disk. If that fails, roll the in-memory change back so
+        # the next restart doesn't disagree with what the operator sees now.
         try:
-           with open('config.json', 'w') as f:
-               json.dump(CONFIG, f, indent=4)
+            config_path = os.path.join(basedir, 'config.json')
+            with open(config_path, 'w') as f:
+                json.dump(CONFIG, f, indent=4)
         except Exception as e:
-           logger.error(f"Could not persist config.json: {e}")
-           
+            CONFIG['WHITELIST'].remove(ip)
+            logger.error(f"Could not persist config.json — rolled back in-memory whitelist add: {e}")
+            return jsonify({
+                "error": "Failed to persist whitelist to disk; in-memory change rolled back.",
+                "detail": str(e),
+            }), 500
+
     return jsonify({"status": "whitelisted", "ip": ip, "whitelist": CONFIG['WHITELIST']})
 
 
@@ -441,7 +448,8 @@ _last_trust_decay = 0.0
 def background_maintenance():
     """
     Runs every 15 seconds in a daemon thread:
-      - Marks sensors as 'offline' if last_seen > 30 seconds ago.
+      - Marks sensors as 'offline' if last_seen > 60 seconds ago
+        (heartbeat interval is 30s, so 60s = 2 missed heartbeats).
       - Deletes expired BlockEvent records and lifts their firewall bans.
       - Stub-processes the HoneypotQueue: anything older than
         HONEYPOT_EVAL_SECONDS is marked processed.
@@ -455,7 +463,7 @@ def background_maintenance():
                 now = datetime.utcnow()
                 wall = time.time()
 
-                cutoff = now - timedelta(seconds=30)
+                cutoff = now - timedelta(seconds=60)
                 stale_sensors = SensorNode.query.filter(
                     SensorNode.last_seen < cutoff,
                     SensorNode.status != "offline"
