@@ -2,7 +2,7 @@
     "sensor_id": "sensor_01",
     "controller_url": "https://controller.local:5000/alert",
     "interface": "eth0",
-    "threshold": 0.083,
+    "threshold": 0.115,
     "alert_confidence_threshold": 20,
     "alert_rate_limit_seconds": 8.5,
     "flow_state_max_entries": 10000,

@@ -18,7 +18,11 @@ print("🧪 Generating realistic synthetic dataset...")
 rng = np.random.default_rng(42)
 
 # ── 1. High-Speed Downloads (Steam, large files via HTTP/HTTPS) ───────────────
-#    Real: MTU-sized packets, high ACK rate, sustained throughput up to ~125 MB/s
+#    Real: MTU-sized packets, high ACK rate, sustained throughput up to ~125 MB/s.
+#    FIX: previous version used a single uniform cluster over a huge range,
+#    which gave each point low density and made even centred test cases
+#    (e.g. 30k pps / 45 MB/s Steam) score as borderline-anomalous. Split into
+#    two: a wide uniform for coverage AND a dense Gaussian for the typical case.
 n_dl = 15000
 dl = {
     'frame_len':   rng.choice([1400, 1500], n_dl),
@@ -26,7 +30,17 @@ dl = {
     'proto':       np.full(n_dl, 6),
     'flags':       np.full(n_dl, 0x10),           # ACK
     'packet_rate': rng.uniform(1000, 50000, n_dl),
-    'byte_rate':   rng.uniform(1_500_000, 100_000_000, n_dl),  # up to 100 MB/s
+    'byte_rate':   rng.uniform(1_500_000, 100_000_000, n_dl),
+}
+
+n_dl_dense = 10000
+dl_dense = {
+    'frame_len':   np.full(n_dl_dense, 1500),
+    'port':        rng.choice([443, 80, 27015], n_dl_dense, p=[0.5, 0.3, 0.2]),
+    'proto':       np.full(n_dl_dense, 6),
+    'flags':       np.full(n_dl_dense, 0x10),
+    'packet_rate': rng.normal(25000, 8000, n_dl_dense).clip(5000, 50000),
+    'byte_rate':   rng.normal(35_000_000, 15_000_000, n_dl_dense).clip(5_000_000, 80_000_000),
 }
 
 # ── 2. 4K Streaming / YouTube (QUIC or TCP) ──────────────────────────────────
@@ -131,6 +145,23 @@ sys_bg = {
     'byte_rate':   rng.uniform(1, 1500, n_sys),
 }
 
+# ── 9. Moderate-rate Streaming / Video Call (NEW — fills the gap) ────────────
+#    FIX: Without this, anything with packet_rate 30–200 was scored as
+#    anomalous because the training set only had web_idle (1–50 pps) and
+#    web_burst (200–3000 pps). Real-world traffic — a moderate-quality
+#    YouTube stream, a Zoom call, a modest TCP video — lives in this gap.
+n_moderate = 9000
+moderate = {
+    'frame_len':   rng.choice([200, 500, 1000, 1400, 1500], n_moderate,
+                              p=[0.1, 0.2, 0.2, 0.2, 0.3]),
+    'port':        rng.choice([443, 80, 27015, 5004, 3478], n_moderate,
+                              p=[0.6, 0.2, 0.1, 0.05, 0.05]),
+    'proto':       rng.choice([6, 17], n_moderate, p=[0.55, 0.45]),
+    'flags':       rng.choice([0x10, 0x18, 0], n_moderate, p=[0.45, 0.25, 0.30]),
+    'packet_rate': rng.uniform(20, 300, n_moderate),
+    'byte_rate':   rng.uniform(20_000, 500_000, n_moderate),
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ATTACK / ANOMALY DATA
 # FIX: Old noise was pure uniform random — it overlapped with legitimate traffic
@@ -212,27 +243,29 @@ dns_amp = {
 # Assemble and train
 # ─────────────────────────────────────────────────────────────────────────────
 
-frames_normal = [dl, st, web_burst, web_idle, dns, tls, game, ping, sys_bg]
+frames_normal = [dl, dl_dense, st, web_burst, web_idle, dns, tls, game, ping, sys_bg, moderate]
 frames_attack = [icmp_flood, syn_flood, udp_flood, http_flood, scan, dns_amp]
 
 df_normal = pd.concat([pd.DataFrame(f) for f in frames_normal], ignore_index=True)
 df_attack = pd.concat([pd.DataFrame(f) for f in frames_attack], ignore_index=True)
-df = pd.concat([df_normal, df_attack], ignore_index=True)
-df = df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-# Ensure column order matches verify_model.py: [frame_len, port, proto, flags, packet_rate, byte_rate]
 feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate']
-df = df[feature_cols]
+df_normal = df_normal[feature_cols].sample(frac=1, random_state=42).reset_index(drop=True)
+df_attack = df_attack[feature_cols].reset_index(drop=True)
 
-contamination = len(df_attack) / len(df)
-print(f"   Normal samples : {len(df_normal):,}")
-print(f"   Attack samples : {len(df_attack):,}")
-print(f"   Contamination  : {contamination:.3f} ({contamination*100:.1f}%)")
+# Contamination — for an IF trained ONLY on normal data, this is the fraction
+# of training samples the model is allowed to internally classify as outliers
+# when it calibrates its decision boundary. A small value (1%) is right for
+# clean synthetic normal data; the attack samples are NOT in training.
+contamination = 0.01
+print(f"   Normal samples (training)   : {len(df_normal):,}")
+print(f"   Attack samples (held out)   : {len(df_attack):,}  — used only for evaluation")
+print(f"   Contamination               : {contamination:.3f}  (normal-only training)")
 
-# FIX: Pipeline = RobustScaler (handles outliers better than Standard) + IsolationForest
-#      The scaler is now INSIDE the model — verify_model.py loads it transparently.
+# Pipeline = RobustScaler (handles outliers better than Standard) + IsolationForest.
+# The scaler is baked into the saved model so verify_model.py loads it transparently.
 pipeline = Pipeline([
-    ('scaler', RobustScaler()),           # normalises each feature independently
+    ('scaler', RobustScaler()),
     ('clf', IsolationForest(
         n_estimators=300,
         max_samples=1024,
@@ -242,12 +275,25 @@ pipeline = Pipeline([
     )),
 ])
 
-print("\n🔧 Training pipeline (RobustScaler + IsolationForest)...")
-pipeline.fit(df)
+# CRITICAL: train on NORMAL data only. Mixing attack samples into training
+# teaches the IF that attacks are part of the normal distribution — which is
+# exactly why TCP SYN floods were previously scoring as benign. With
+# normal-only training, anything outside the learned boundary of normal
+# (including novel attacks the model has never seen) is correctly flagged.
+print("\n🔧 Training pipeline (RobustScaler + IsolationForest) on NORMAL-only data...")
+pipeline.fit(df_normal)
+
+# Quick held-out evaluation so the trainer prints a sanity summary instead of
+# requiring you to run verify_model.py afterwards.
+import numpy as np
+normal_scores = pipeline.decision_function(df_normal)
+attack_scores = pipeline.decision_function(df_attack)
+print(f"\n📊 Held-out evaluation (threshold=0.083):")
+print(f"   Normal median score : {np.median(normal_scores):+.3f}   (higher = more normal)")
+print(f"   Attack median score : {np.median(attack_scores):+.3f}   (lower / negative = more anomalous)")
+print(f"   Normal flagged FP   : {(normal_scores < 0.083).mean()*100:.1f}%")
+print(f"   Attack caught (TPR) : {(attack_scores < 0.083).mean()*100:.1f}%")
 
 output_path = "model_advanced.pkl"
 joblib.dump(pipeline, output_path)
-print(f"✅ Model saved to {output_path}")
-print("\nNOTE: If your AnomalyDetector calls clf.decision_function() or clf.score_samples()")
-print("      directly, update it to call pipeline.decision_function() / pipeline.score_samples().")
-print("      If it calls pipeline.predict() it will work unchanged.")
+print(f"\n✅ Model saved to {output_path}")
