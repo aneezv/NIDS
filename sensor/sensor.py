@@ -16,6 +16,10 @@ from features import parse_tshark_line
 from detector import AnomalyDetector
 import builtins
 
+# Load API_KEY (and any other secrets) from sensor/.env before reading config.
+# Without this, os.getenv("API_KEY") below sees only the shell environment.
+load_dotenv()
+
 # --- LOGGING SETUP ---
 _original_print = builtins.print
 def _timestamped_print(*args, **kwargs):
@@ -26,9 +30,13 @@ builtins.print = _timestamped_print
 with open("config.json") as config :
     data = json.load(config)
 
-if os.getenv("API_KEY"):
-    data["API_KEY"] = os.getenv("API_KEY") 
-  
+data["API_KEY"] = os.getenv("API_KEY") or data.get("API_KEY")
+if not data.get("API_KEY"):
+    raise RuntimeError(
+        "API_KEY is not set. Add it to sensor/.env (preferred) or sensor/config.json. "
+        "The controller will reject every alert/heartbeat without it."
+    )
+
 CONTROLLER_URL = data.get("controller_url")
 #create a heartbeat url to replace 'alert' with 'heartbeat'
 HEARTBEAT_URL = CONTROLLER_URL.replace("alert","heartbeat")
