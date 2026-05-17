@@ -6,4 +6,7 @@ __pycache__/
 *.pem
 
 nids.db
+nids.db-journal
+*.db
+*.db-journal
 audit.log
