@@ -69,8 +69,8 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 ### Trust Management
 **Owner: Devika**
 - [x] Initialize trust score for new sensors
-- [ ] Update trust score based on verification outcomes
-- [ ] Persist trust changes in database
+- [x] Update trust score based on verification outcomes
+- [x] Persist trust changes in database
 
 ---
 
@@ -79,16 +79,23 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Verification Rules
 **Owner: Jisto (Logic) + Devika (Data Access)**
-- [ ] Correlate alerts from multiple sensors
-- [ ] Fetch trust score of alerting sensor
-- [ ] Evaluate runtime IP behavior history
-- [ ] Compute verification confidence score
+- [x] Correlate alerts from multiple sensors
+- [x] Fetch trust score of alerting sensor
+- [x] Evaluate runtime IP behavior history        _(partial: 1-hour cumulative window only)_
+- [x] Compute verification confidence score        _(not implemented as named value)_
 
 ### Trust-Aware Decision Logic
 **Owner: Jisto**
-- [ ] High-trust sensor → fewer verification steps
-- [ ] Low-trust sensor → require stronger evidence
-- [ ] Borderline confidence → flag for honeypot verification
+- [x] High-trust sensor → fewer verification steps
+- [x] Low-trust sensor → require stronger evidence
+- [x] Borderline confidence → enqueue IP for honeypot via `HoneypotQueue` table
+
+### Verdict Visibility
+**Owner: Jisto**
+- [x] `process_threat()` returns structured dict: `{ ip, score, confidence, verdict, sensor_trust, sensors }`
+- [x] Every verdict persisted to `VerificationResult` DB table
+- [x] `GET /api/verdicts` endpoint exposes verdicts to dashboard
+- [x] `GET /api/honeypot` endpoint exposes unprocessed BORDERLINE queue
 
 ---
 
@@ -97,10 +104,10 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 
 ### Firewall & Response
 **Owner: Jisto**
-- [ ] Implement `block_ip()` at router level
-- [ ] Implement `unblock_ip()` and temporary bans
-- [ ] Implement runtime IP whitelist
-- [ ] Add manual override hooks
+- [x] Implement `block_ip()` at router level
+- [x] Implement `unblock_ip()` and temporary bans
+- [x] Implement runtime IP whitelist
+- [x] Add manual override hooks
 
 ---
 
@@ -122,10 +129,10 @@ Tasks marked (BLOCKER) must be completed before dependent tasks can proceed.
 ### UI & Dashboard
 **Owner: Anees**
 - [x] Dashboard Mockup UI
-- [ ] Dashboard for sensors, alerts, trust scores
-- [ ] Live alert monitor
-- [ ] Block / Unblock controls
-- [ ] System health indicators
+- [x] Dashboard for sensors, alerts, trust scores
+- [x] Live alert monitor
+- [x] Block / Unblock controls
+- [x] System health indicators
 
 ### Integration & Testing
 **Owner: Anees (Lead) + All Members**

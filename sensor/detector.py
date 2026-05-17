@@ -8,7 +8,7 @@ class AnomalyDetector:
         print(f"🧠 Loading Model from {model_path} (Threshold: {threshold})...")
         self.model = joblib.load(model_path)
         self.model_path = model_path
-        self.feature_cols = ['frame.len', 'port', 'ip.proto', 'tcp.flags']
+        self.feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate']
         self.threshold = threshold
 
     def normalize_score(self, anomaly_score):
@@ -40,6 +40,15 @@ class AnomalyDetector:
             "last_trained" : date_str,
             "threshold" : self.threshold
         }
+
+    def load_model(self, new_path):
+        """
+        Hot-swaps the model at runtime without restarting.
+        Called by sensor.py's hot_reload() function.
+        """
+        self.model = joblib.load(new_path)
+        self.model_path = new_path
+        print(f"🔄 Model reloaded: {new_path}")
 
     def predict_batch(self, batch_features):
         """

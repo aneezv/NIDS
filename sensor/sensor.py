@@ -6,10 +6,21 @@ import urllib3
 import json
 import threading
 import psutil
+import socket
+import urllib.parse
+import threading
+import psutil
 from collections import deque
 from dotenv import load_dotenv
 from features import parse_tshark_line
 from detector import AnomalyDetector
+import builtins
+
+# --- LOGGING SETUP ---
+_original_print = builtins.print
+def _timestamped_print(*args, **kwargs):
+    _original_print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
+builtins.print = _timestamped_print
 
 # --- CONFIGURATION ---
 with open("config.json") as config :
@@ -107,6 +118,7 @@ def send_heartbeat():
             # Create the small JSON payload
             payload = {
                 "sensor_id": SENSOR_ID,
+                "status": "OK",
                 "cpu_load": CPU_LOAD
             }
             
@@ -132,9 +144,74 @@ def send_heartbeat():
         
         time.sleep(30)
 
+def hot_reload(new_path):
+    """
+    Reloads the Isolation Forest model at runtime.
+    Can be called manually or by the watcher thread.
+    """
+    try:
+        detector.load_model(new_path)
+        print(f"🔄 Model reloaded: {os.path.basename(new_path)}")
+    except Exception as e:
+        print(f"⚠️ Hot reload failed: {e}")
+
+
+def model_watcher():
+    """
+    Background thread: checks every 5 minutes if model_latest.pkl
+    is newer than the currently loaded model. If yes, reloads it.
+    """
+    watch_path = os.path.join(os.path.dirname(MODEL_PATH), "model_latest.pkl")
+    last_mtime = None
+
+    while True:
+        try:
+            if os.path.exists(watch_path):
+                current_mtime = os.path.getmtime(watch_path)
+                if last_mtime is None or current_mtime > last_mtime:
+                    print(f"🔍 New model detected: model_latest.pkl")
+                    hot_reload(watch_path)
+                    last_mtime = current_mtime
+        except Exception as e:
+            print(f"⚠️ Model watcher error: {e}")
+
+        time.sleep(300)  # Check every 5 minutes
+
 def monitor_traffic():
+    # Attempt to determine sensor IP (default to 127.0.0.1 on failure)
+    sensor_ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        sensor_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    # Attempt to determine controller IP and Port
+    controller_ip = "127.0.0.1"
+    controller_port = 5000
+    try:
+        parsed = urllib.parse.urlparse(CONTROLLER_URL)
+        if parsed.hostname:
+            controller_ip = socket.gethostbyname(parsed.hostname)
+        if parsed.port:
+            controller_port = parsed.port
+        elif parsed.scheme == "https":
+            controller_port = 443
+        elif parsed.scheme == "http":
+            controller_port = 80
+    except Exception:
+        pass
+
+    # BPF filter drops packets to/from the controller API to prevent alert feedback loops.
+    # By using 'and port', attacks originating from the controller machine are still detected!
+    bpf_filter = f"not (host {controller_ip} and port {controller_port})"
+    print(f"🌍 Resolved Sensor IP: {sensor_ip} | Controller: {controller_ip}:{controller_port}")
+
     cmd = [
         "tshark", "-i", INTERFACE,
+        "-f", bpf_filter,
         "-T", "fields",
         "-e", "ip.src",
         "-e", "frame.len",
@@ -153,6 +230,10 @@ def monitor_traffic():
         batch_data = []
         batch_ips = []
         
+        # [NEW] Micro-Flow State Tracker
+        flow_state = {} # ip -> {'first_seen': float, 'pkts': int, 'bytes': int}
+        WINDOW_SIZE = 2.0
+        
         for line in process.stdout:
             src_ip, features = parse_tshark_line(line)
             
@@ -162,6 +243,35 @@ def monitor_traffic():
             # Whitelist Self/Router to avoid feedback loops
             if src_ip in WHITELIST: 
                 continue
+                
+            now = time.time()
+            frame_len = features[0]
+            
+            # [NEW] Flow logic update
+            if src_ip not in flow_state:
+                flow_state[src_ip] = {'first_seen': now, 'pkts': 0, 'bytes': 0}
+                
+            state = flow_state[src_ip]
+            state['pkts'] += 1
+            state['bytes'] += frame_len
+            
+            elapsed = now - state['first_seen']
+            
+            # Calculate rates. Force a minimum of 1.0s elapsed to prevent initial microsecond spikes.
+            effective_elapsed = max(elapsed, 1.0)
+            packet_rate = state['pkts'] / effective_elapsed
+            byte_rate = state['bytes'] / effective_elapsed
+            
+            # Reset window every 2 seconds
+            if elapsed >= WINDOW_SIZE:
+                state['first_seen'] = now
+                state['pkts'] = 0
+                state['bytes'] = 0
+                
+            # Append new flow features to packet features
+            # Old features: [frame_len, port, proto, flags]
+            # New features: [frame_len, port, proto, flags, packet_rate, byte_rate]
+            features.extend([packet_rate, byte_rate])
 
             batch_data.append(features)
             batch_ips.append(src_ip)
@@ -172,15 +282,15 @@ def monitor_traffic():
                 for i, (raw_score, conf) in enumerate(results):
                     if conf > 20:
                         ip = batch_ips[i]
-                        now = time.time()
+                        now_alert = time.time()
                         
-                        # Rate Limit (30s) per IP
-                        if ip in last_alert_time and (now - last_alert_time[ip] < 30):
+                        # Rate Limit (8.5s) per IP for demonstration
+                        if ip in last_alert_time and (now_alert - last_alert_time[ip] < 8.5):
                             continue
                         
                         print(f"🚨 Anomaly Detected: {ip} | Score: {raw_score:.4f} | Conf: {conf:.1f}")
                         send_alert(ip, conf)
-                        last_alert_time[ip] = now
+                        last_alert_time[ip] = now_alert
                 
                 batch_data = []
                 batch_ips = []
@@ -189,11 +299,12 @@ def monitor_traffic():
         print(f"💥 Sensor Crash: {e}")
 
 if __name__ == "__main__":
-    heartbeat_thread = threading.Thread(target= send_heartbeat, daemon= True)
+    heartbeat_thread = threading.Thread(target=send_heartbeat, daemon=True)
     retry_thread = threading.Thread(target=retry_worker, daemon=True)
-
+    watcher_thread = threading.Thread(target=model_watcher, daemon=True)
 
     heartbeat_thread.start()
     retry_thread.start()
+    watcher_thread.start()
 
     monitor_traffic()

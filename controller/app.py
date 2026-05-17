@@ -2,18 +2,40 @@ import logging
 import threading
 import json
 import os
-from models import db, SensorNode, Alert, BlockEvent
+from models import db, SensorNode, Alert, BlockEvent, VerificationResult, HoneypotQueue
 from datetime import datetime 
 import secrets
 import ipaddress
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from verification import VerificationEngine
+from enforcement import remove_ban, enforce_block
 load_dotenv()
+import socket
+
 # --- CONFIGURATION ---
 with open('config.json') as f:
     CONFIG = json.load(f)
+
+# Auto-whitelist the controller's own IP so it never blocks itself
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+controller_ip = get_local_ip()
+if 'WHITELIST' not in CONFIG:
+    CONFIG['WHITELIST'] = []
+if controller_ip not in CONFIG['WHITELIST']:
+    CONFIG['WHITELIST'].append(controller_ip)
+if "127.0.0.1" not in CONFIG['WHITELIST']:
+    CONFIG['WHITELIST'].append("127.0.0.1")
 if os.getenv("API_KEY"):
     CONFIG["API_KEY"] = os.getenv("API_KEY")    
 app = Flask(__name__)
@@ -25,10 +47,15 @@ import os
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'nids.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    "pool_pre_ping": True,
+    "connect_args": {
+        "timeout": 15
+    }
+}
 db.init_app(app)
 
-# NOTE: Tables created manually via create_db_manual.py
-# Do NOT use db.create_all() - it wipes existing data!
+# NOTE: Initialize or migrate the database using setup_db.py
 
 # --- LOGGING ---
 import sys
@@ -120,6 +147,21 @@ def list_nodes():
         "last_seen": n.last_seen.isoformat() if n.last_seen else None
     } for n in nodes])
 
+# [NEW] Management API: Delete Node
+@app.route('/api/nodes/<sensor_id>', methods=['DELETE'])
+def delete_node(sensor_id):
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+    
+    node = SensorNode.query.get(sensor_id)
+    if not node:
+         return jsonify({"error": "Sensor not found"}), 404
+         
+    db.session.delete(node)
+    db.session.commit()
+    logger.info(f"[ADMIN] Deleted sensor {sensor_id}")
+    return jsonify({"status": "deleted", "id": sensor_id}), 200
+
 # [NEW] Management API: List Alerts
 @app.route('/api/alerts', methods=['GET'])
 def list_alerts():
@@ -148,17 +190,84 @@ def system_status():
 # [NEW] Management API: Unban
 @app.route('/api/action/unban', methods=['POST'])
 def unban_ip():
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+         
     data = request.json
     ip = data.get('ip')
+    if not ip:
+         return jsonify({"error": "IP is required"}), 400
     
-    # Logic to call unblock script would go here (Jisto's task)
+    # Logic to call unblock script
     logger.info(f"[ADMIN] [UNBAN] Request to unban {ip}")
+    remove_ban(ip)
     
     # Remove from BlockEvent DB
     BlockEvent.query.filter_by(ip=ip).delete()
     db.session.commit()
     
     return jsonify({"status": "unbanned", "ip": ip})
+
+# [NEW] Management API: Manual Block
+@app.route('/api/action/block', methods=['POST'])
+def block_ip_manual():
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+         
+    data = request.json
+    ip = data.get('ip')
+    if not ip:
+         return jsonify({"error": "IP is required"}), 400
+    
+    logger.info(f"[ADMIN] [BLOCK] Request to manually block {ip}")
+    
+    whitelist = CONFIG.get('WHITELIST', [])
+    if ip in whitelist:
+         logger.warning(f"[ADMIN] [BLOCK] Rejected: {ip} is whitelisted.")
+         return jsonify({"error": f"Cannot block {ip} (Whitelisted)"}), 400
+         
+    # duration=0 for permanent blocks in ipset
+    enforce_block(ip, {"score": 100.0}, whitelist, app, duration=0)
+    
+    # Record in database (expires_at gets None automatically = permanent)
+    block_event = BlockEvent(ip=ip, reason=f"Manual Override Block")
+    db.session.add(block_event)
+    db.session.commit()
+    
+    return jsonify({"status": "blocked", "ip": ip})
+
+# [NEW] Management API: Whitelist
+@app.route('/api/action/whitelist', methods=['POST'])
+def whitelist_ip():
+    if not check_auth():
+         return jsonify({"error": "Unauthorized"}), 401
+         
+    data = request.json
+    ip = data.get('ip')
+    if not ip:
+         return jsonify({"error": "IP is required"}), 400
+         
+    logger.info(f"[ADMIN] [WHITELIST] Request to whitelist {ip}")
+    
+    # Unban just in case they were previously banned
+    remove_ban(ip)
+    BlockEvent.query.filter_by(ip=ip).delete()
+    db.session.commit()
+    
+    # Add to runtime whitelist
+    if 'WHITELIST' not in CONFIG:
+        CONFIG['WHITELIST'] = []
+    
+    if ip not in CONFIG['WHITELIST']:
+        CONFIG['WHITELIST'].append(ip)
+        # Optional: Save back to config.json here if persistence is needed
+        try:
+           with open('config.json', 'w') as f:
+               json.dump(CONFIG, f, indent=4)
+        except Exception as e:
+           logger.error(f"Could not persist config.json: {e}")
+           
+    return jsonify({"status": "whitelisted", "ip": ip, "whitelist": CONFIG['WHITELIST']})
 
 
  #Heartbeat
@@ -195,8 +304,8 @@ def manage_config():
         if not data:
              return jsonify({"error": "No data received"}), 400
              
-        # MODIFIED: Only allow WHITELIST updates for now
-        allowed_keys = ['WHITELIST']
+        # Allow WHITELIST, BLOCK_THRESHOLD, TRUST_THRESHOLD updates from dashboard
+        allowed_keys = ['WHITELIST', 'BLOCK_THRESHOLD', 'TRUST_THRESHOLD']
         
         for key, value in data.items():
             if key in allowed_keys:
@@ -211,6 +320,146 @@ def get_trust():
     """Admin endpoint to view sensor health"""
     # Optional: Protect this too? Leaving public for dashboard for now.
     return jsonify(engine.get_trust_scores())
+
+# --- DASHBOARD ROUTES ---
+DASHBOARD_DIR = os.path.join(basedir, 'dashboard')
+
+@app.route('/dashboard')
+def serve_dashboard():
+    """Serve the main dashboard page"""
+    return send_from_directory(DASHBOARD_DIR, 'index.html', max_age=0)
+
+@app.route('/dashboard/<path:filename>')
+def serve_dashboard_assets(filename):
+    """Serve dashboard static assets (CSS, JS)"""
+    return send_from_directory(DASHBOARD_DIR, filename, max_age=0)
+
+# --- ADDITIONAL API ENDPOINTS ---
+
+@app.route('/api/blocks', methods=['GET'])
+def list_blocks():
+    """List all active block events for the dashboard"""
+    blocks = BlockEvent.query.order_by(BlockEvent.blocked_at.desc()).all()
+    return jsonify([{
+        "id": b.id,
+        "ip": b.ip,
+        "reason": b.reason,
+        "blocked_at": b.blocked_at.isoformat() if b.blocked_at else None,
+        "expires_at": b.expires_at.isoformat() if b.expires_at else None
+    } for b in blocks])
+
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Read last N lines from audit.log for the terminal panel"""
+    limit = request.args.get('limit', 40, type=int)
+    log_path = os.path.join(basedir, 'audit.log')
+    lines = []
+    try:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            lines = [l.strip() for l in all_lines[-limit:] if l.strip()]
+    except FileNotFoundError:
+        lines = ['No audit.log file found yet.']
+    except Exception as e:
+        lines = [f'Error reading logs: {str(e)}']
+    return jsonify(lines)
+
+@app.route('/api/verdicts', methods=['GET'])
+def list_verdicts():
+    """Last N verification verdicts — BLOCK, BORDERLINE, or UNVERIFIED.
+    Optional query params: ?limit=50&verdict=BORDERLINE
+    """
+    limit = request.args.get('limit', 50, type=int)
+    verdict_filter = request.args.get('verdict', None)
+
+    query = VerificationResult.query.order_by(VerificationResult.timestamp.desc())
+    if verdict_filter:
+        query = query.filter(VerificationResult.verdict == verdict_filter.upper())
+    results = query.limit(limit).all()
+
+    return jsonify([{
+        "id":          r.id,
+        "ip":          r.ip,
+        "score":       r.score,
+        "confidence":  r.confidence,
+        "verdict":     r.verdict,
+        "sensor_trust": r.sensor_trust,
+        "sensors":     r.sensors,
+        "timestamp":   r.timestamp.isoformat()
+    } for r in results])
+
+@app.route('/api/honeypot', methods=['GET'])
+def list_honeypot_queue():
+    """Returns unprocessed BORDERLINE IPs queued for honeypot verification."""
+    entries = HoneypotQueue.query.filter_by(processed=False).order_by(
+        HoneypotQueue.queued_at.desc()
+    ).all()
+    return jsonify([{
+        "id":        e.id,
+        "ip":        e.ip,
+        "score":     e.score,
+        "queued_at": e.queued_at.isoformat()
+    } for e in entries])
+
+# --- BACKGROUND MAINTENANCE THREAD (D2 + D3) ---
+from datetime import timedelta
+import time
+
+def background_maintenance():
+    """
+    Runs every 15 seconds in a daemon thread:
+      D2 — Marks sensors as 'offline' if last_seen > 30 seconds ago.
+      D3 — Deletes expired BlockEvent records and lifts their firewall bans.
+    """
+    while True:
+        time.sleep(15)
+        try:
+            with app.app_context():
+                now = datetime.utcnow()
+
+                # --- D2: Sensor Offline Detection ---
+                cutoff = now - timedelta(seconds=30)
+                stale_sensors = SensorNode.query.filter(
+                    SensorNode.last_seen < cutoff,
+                    SensorNode.status != "offline"
+                ).all()
+                for node in stale_sensors:
+                    node.status = "offline"
+                    logger.info(
+                        f"[MAINTENANCE] Sensor {node.id} marked offline "
+                        f"(last seen: {node.last_seen})"
+                    )
+
+                # --- D3: BlockEvent Expiry Cleanup ---
+                expired_blocks = BlockEvent.query.filter(
+                    BlockEvent.expires_at != None,
+                    BlockEvent.expires_at < now
+                ).all()
+                for block in expired_blocks:
+                    logger.info(
+                        f"[MAINTENANCE] Expired block removed: {block.ip} "
+                        f"(expired at: {block.expires_at})"
+                    )
+                    remove_ban(block.ip)
+                    db.session.delete(block)
+
+                db.session.commit()
+        except Exception as e:
+            logger.error(f"[MAINTENANCE] Background task error: {e}")
+
+# Start the maintenance thread as a daemon (auto-exits with the app)
+maintenance_thread = threading.Thread(target=background_maintenance, daemon=True)
+maintenance_thread.start()
+logger.info("[MAINTENANCE] Background maintenance thread started (15s interval)")
+
 if __name__ == '__main__':
-    # Fail if certs are missing. No fallback to HTTP allowed.
-    app.run(host='0.0.0.0', port=5000, threaded=True, ssl_context=('cert.pem', 'key.pem'))
+    # Try SSL first; fall back to plain HTTP for dev/testing
+    ssl_ctx = None
+    cert_path = os.path.join(basedir, 'cert.pem')
+    key_path = os.path.join(basedir, 'key.pem')
+    if os.path.exists(cert_path) and os.path.exists(key_path):
+        ssl_ctx = (cert_path, key_path)
+        logger.info("Starting with SSL (cert.pem + key.pem)")
+    else:
+        logger.warning("SSL certs not found — starting in HTTP-only dev mode")
+    app.run(host='0.0.0.0', port=5000, threaded=True, ssl_context=ssl_ctx)
