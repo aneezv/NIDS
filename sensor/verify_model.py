@@ -1,8 +1,11 @@
+import os
 import sys
-sys.path.append("c:/Projects/NIDS/sensor")
+
+SENSOR_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SENSOR_DIR)
 from detector import AnomalyDetector
 
-detector = AnomalyDetector("c:/Projects/NIDS/sensor/model_advanced.pkl", threshold=0.083)
+detector = AnomalyDetector(os.path.join(SENSOR_DIR, "model_advanced.pkl"), threshold=0.083)
 
 # [frame_len, port, proto, flags, packet_rate, byte_rate]
 
