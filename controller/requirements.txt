@@ -1,3 +1,8 @@
+# Controller runtime
 Flask
 python-dotenv
 flask-sqlalchemy
+SQLAlchemy
+
+# Dev / test
+pytest

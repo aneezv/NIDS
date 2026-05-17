@@ -1,3 +1,11 @@
-Flask
+# Runtime deps for sensor.py and detector.py
+requests
+urllib3
 python-dotenv
 psutil
+
+# ML stack — used by detector.py at runtime and train.py for training
+scikit-learn
+pandas
+numpy
+joblib
