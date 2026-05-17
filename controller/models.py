@@ -9,6 +9,7 @@ class SensorNode(db.Model):
     trust_score = db.Column(db.Float, default=50.0)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(20), default="offline")
+    cpu_load = db.Column(db.Float, nullable=True)
 
 class Alert(db.Model):
     __tablename__ = 'alert'

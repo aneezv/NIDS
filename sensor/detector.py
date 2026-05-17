@@ -31,8 +31,7 @@ class AnomalyDetector:
         try:
             mod_time = os.path.getmtime(self.model_path)
             date_str = datetime.datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M')
-
-        except :
+        except (OSError, ValueError):
             date_str = "Unknown"
 
         return {

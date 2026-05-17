@@ -6,22 +6,27 @@ logger = logging.getLogger("NIDS_Controller.Enforcement")
 
 def calculate_ban_duration(ip, app):
     """
-    Returns seconds to ban based on repeat offenses (previous blocks).
-    """
-    from models import BlockEvent
-    # Count how many times this IP has been blocked before
-    offense_count = BlockEvent.query.filter_by(ip=ip).count()
+    Returns seconds to ban based on repeat offenses in the last 7 days.
 
-    # offense_count is previous blocks.
-    # 0 prev blocks = 1st offense
-    # 1 prev block = 2nd offense
+    Only recent offenses count — a block from months ago shouldn't escalate
+    today's IP straight to a 24h ban. The 7-day window resets after a week
+    of good behaviour.
+    """
+    from datetime import datetime, timedelta
+    from models import BlockEvent
+
+    recent_cutoff = datetime.utcnow() - timedelta(days=7)
+    offense_count = BlockEvent.query.filter(
+        BlockEvent.ip == ip,
+        BlockEvent.blocked_at >= recent_cutoff
+    ).count()
 
     if offense_count == 0:
-        return 300      # 5 Minutes
+        return 300      # 5 minutes
     elif offense_count == 1:
-        return 1800     # 30 Minutes
+        return 1800     # 30 minutes
     else:
-        return 86400    # 24 Hours (Maximum Penalty)
+        return 86400    # 24 hours (maximum penalty)
 
 def enforce_block(ip, threat_info, whitelist, app, duration=None):
     """Executes the actual firewall block using ipset/iptables"""

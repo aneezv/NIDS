@@ -35,9 +35,23 @@ with app.app_context():
     # Safely creates all tables defined in models.py that don't currently exist
     db.create_all()
 
-    # Verify tables
+    # Lightweight per-column migration: SQLAlchemy's create_all() only creates
+    # missing TABLES, not missing COLUMNS. Add new columns on existing tables here.
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+
+    def _ensure_column(table, column, ddl):
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cursor.fetchall()}
+        if column not in existing:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+            print(f"   + Added column {table}.{column}")
+
+    _ensure_column('sensor_node', 'cpu_load', 'cpu_load REAL')
+
+    conn.commit()
+
+    # Verify tables
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = cursor.fetchall()
     table_names = [t[0] for t in tables]

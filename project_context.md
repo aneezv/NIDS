@@ -24,8 +24,8 @@ Anomaly-based IDS can detect unknown attacks but suffer from high false positive
 ### 2️⃣ Verification Layer (Core Contribution)
 *   Aggregates independent evidence:
     *   Repeated anomalies over time.
-    *   Multi-node confirmation.
-    *   Short-term IP history.
+    *   **Multi-sensor evidence aggregation** — the more distinct sensors report the same IP, the higher the score (capped). A *low-trust single sensor cannot* meet the threshold alone — it must be corroborated by another sensor.
+    *   Short-term IP history (15-minute time-bucket persistence bonus).
     *   **Trust-weighted sensor alerts.**
     *   *Optional honeypot confirmation (evidence only).*
 *   Computes a verification confidence score.

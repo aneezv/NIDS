@@ -3,6 +3,9 @@
     "controller_url": "https://controller.local:5000/alert",
     "interface": "eth0",
     "threshold": 0.083,
+    "alert_confidence_threshold": 20,
+    "alert_rate_limit_seconds": 8.5,
+    "flow_state_max_entries": 10000,
     "model_path": "model_advanced.pkl",
     "batch_size": 10,
     "whitelist": [

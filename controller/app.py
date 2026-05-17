@@ -146,10 +146,11 @@ def receive_alert():
 def list_nodes():
     nodes = SensorNode.query.all()
     return jsonify([{
-        "id": n.id, 
-        "ip": n.ip, 
-        "trust": n.trust_score, 
+        "id": n.id,
+        "ip": n.ip,
+        "trust": n.trust_score,
         "status": n.status,
+        "cpu_load": n.cpu_load,
         "last_seen": n.last_seen.isoformat() if n.last_seen else None
     } for n in nodes])
 
@@ -171,7 +172,7 @@ def delete_node(sensor_id):
 # [NEW] Management API: List Alerts
 @app.route('/api/alerts', methods=['GET'])
 def list_alerts():
-    limit = request.args.get('limit', 50, type=int)
+    limit = max(1, min(request.args.get('limit', 50, type=int), 500))
     alerts = Alert.query.order_by(Alert.timestamp.desc()).limit(limit).all()
     return jsonify([{
         "id": a.id,
@@ -248,11 +249,15 @@ def whitelist_ip():
     if not check_auth():
          return jsonify({"error": "Unauthorized"}), 401
          
-    data = request.json
+    data = request.json or {}
     ip = data.get('ip')
     if not ip:
          return jsonify({"error": "IP is required"}), 400
-         
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return jsonify({"error": f"Invalid IP format: {ip}"}), 400
+
     logger.info(f"[ADMIN] [WHITELIST] Request to whitelist {ip}")
     
     # Unban just in case they were previously banned
@@ -283,19 +288,23 @@ def heartbeat():
     # Previously missing in work_flow check phase 2!
     if not check_auth():
         return jsonify({"error": "Unauthorized"}), 401
-    data = request.json
+    data = request.json or {}
     sensor_id = data.get('sensor_id')
-    
-    # [NEW] Update Sensor in DB
+    if not sensor_id:
+        return jsonify({"error": "sensor_id required"}), 400
+
     node = SensorNode.query.get(sensor_id)
     if not node:
         node = SensorNode(id=sensor_id, ip=request.remote_addr)
         db.session.add(node)
-    
+
     node.last_seen = datetime.utcnow()
-    node.status = "online"
+    node.status = data.get('status') or 'online'
+    cpu_load = data.get('cpu_load')
+    if isinstance(cpu_load, (int, float)):
+        node.cpu_load = float(cpu_load)
     db.session.commit()
-    
+
     return jsonify({"status": "ok"}), 200
     
 @app.route('/config', methods=['POST', 'GET'])
@@ -361,7 +370,7 @@ def list_blocks():
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
     """Read last N lines from audit.log for the terminal panel"""
-    limit = request.args.get('limit', 40, type=int)
+    limit = max(1, min(request.args.get('limit', 40, type=int), 500))
     log_path = os.path.join(basedir, 'audit.log')
     lines = []
     try:
@@ -379,7 +388,7 @@ def list_verdicts():
     """Last N verification verdicts — BLOCK, BORDERLINE, or UNVERIFIED.
     Optional query params: ?limit=50&verdict=BORDERLINE
     """
-    limit = request.args.get('limit', 50, type=int)
+    limit = max(1, min(request.args.get('limit', 50, type=int), 500))
     verdict_filter = request.args.get('verdict', None)
 
     query = VerificationResult.query.order_by(VerificationResult.timestamp.desc())

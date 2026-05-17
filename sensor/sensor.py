@@ -40,6 +40,9 @@ MODEL_PATH = data.get("model_path")
 THRESHOLD = data.get("threshold")
 WHITELIST = data.get("whitelist", ["127.0.0.1"])
 CERT_PATH = data.get("cert_path", "cert.pem") # Path to the certificate copied from controller
+ALERT_CONF_THRESHOLD = float(data.get("alert_confidence_threshold", 20))
+ALERT_RATE_LIMIT_SECONDS = float(data.get("alert_rate_limit_seconds", 8.5))
+FLOW_STATE_MAX_ENTRIES = int(data.get("flow_state_max_entries", 10000))
 
 # --- INITIALIZATION ---
 detector = AnomalyDetector(
@@ -249,6 +252,13 @@ def monitor_traffic():
             
             # [NEW] Flow logic update
             if src_ip not in flow_state:
+                # Bound memory: if the table grew past the configured cap,
+                # evict the oldest 10% of entries by first_seen.
+                if len(flow_state) >= FLOW_STATE_MAX_ENTRIES:
+                    evict_count = max(1, FLOW_STATE_MAX_ENTRIES // 10)
+                    oldest = sorted(flow_state.items(), key=lambda kv: kv[1]['first_seen'])[:evict_count]
+                    for k, _ in oldest:
+                        flow_state.pop(k, None)
                 flow_state[src_ip] = {'first_seen': now, 'pkts': 0, 'bytes': 0}
                 
             state = flow_state[src_ip]
@@ -280,12 +290,13 @@ def monitor_traffic():
                 results = detector.predict_batch(batch_data)
                 
                 for i, (raw_score, conf) in enumerate(results):
-                    if conf > 20:
+                    if conf > ALERT_CONF_THRESHOLD:
                         ip = batch_ips[i]
                         now_alert = time.time()
-                        
-                        # Rate Limit (8.5s) per IP for demonstration
-                        if ip in last_alert_time and (now_alert - last_alert_time[ip] < 8.5):
+
+                        # Rate limit per IP — avoids spamming the controller
+                        # during a sustained burst from the same source.
+                        if ip in last_alert_time and (now_alert - last_alert_time[ip] < ALERT_RATE_LIMIT_SECONDS):
                             continue
                         
                         print(f"🚨 Anomaly Detected: {ip} | Score: {raw_score:.4f} | Conf: {conf:.1f}")
