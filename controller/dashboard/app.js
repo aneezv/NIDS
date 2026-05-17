@@ -118,6 +118,7 @@ async function apiFetch(endpoint, options = {}) {
             ...options,
             headers: {
                 'Content-Type': 'application/json',
+                'X-NIDS-Auth': CONFIG.API_KEY,   // every call is now authenticated
                 ...options.headers,
             },
         });
@@ -131,19 +132,17 @@ async function apiFetch(endpoint, options = {}) {
     }
 }
 
+// Retained as thin wrappers for clarity at call sites; the auth header is now
+// attached by apiFetch itself so these don't need to add anything extra.
 function apiAuthFetch(endpoint, body, method = 'POST') {
     return apiFetch(endpoint, {
         method,
-        headers: { 'X-NIDS-Auth': CONFIG.API_KEY },
         body: JSON.stringify(body),
     });
 }
 
 function apiAuthGet(endpoint) {
-    return apiFetch(endpoint, {
-        method: 'GET',
-        headers: { 'X-NIDS-Auth': CONFIG.API_KEY },
-    });
+    return apiFetch(endpoint, { method: 'GET' });
 }
 
 // ============================================================
