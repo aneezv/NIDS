@@ -4,7 +4,7 @@ import os
 import datetime
 
 class AnomalyDetector:
-    def __init__(self, model_path="model.pkl", threshold=0.10):
+    def __init__(self, model_path="model_advanced.pkl", threshold=0.10):
         print(f"🧠 Loading Model from {model_path} (Threshold: {threshold})...")
         self.model = joblib.load(model_path)
         self.model_path = model_path

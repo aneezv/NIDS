@@ -6,7 +6,7 @@
 // ── Configuration ──
 const CONFIG = {
     API_BASE: window.location.origin,
-    API_KEY: 'secure-research-demo-key-123',
+    API_KEY: window.NIDS_API_KEY || '',  // injected by controller/app.py from .env
     POLL_INTERVAL: 7000,       // 7 seconds
     ALERT_LIMIT: 50,
     LOG_LIMIT: 40,

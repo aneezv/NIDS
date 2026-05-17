@@ -36,11 +36,17 @@ if controller_ip not in CONFIG['WHITELIST']:
     CONFIG['WHITELIST'].append(controller_ip)
 if "127.0.0.1" not in CONFIG['WHITELIST']:
     CONFIG['WHITELIST'].append("127.0.0.1")
-if os.getenv("API_KEY"):
-    CONFIG["API_KEY"] = os.getenv("API_KEY")    
+CONFIG["API_KEY"] = os.getenv("API_KEY") or CONFIG.get("API_KEY")
+if not CONFIG.get("API_KEY"):
+    raise RuntimeError(
+        "API_KEY is not set. Add it to controller/.env (preferred) or controller/config.json."
+    )
+
 app = Flask(__name__)
 app.config.update(CONFIG)
-# register_security(app)
+
+from enforce_auth import register_security
+register_security(app)
 
 # [NEW] Database Configuration - USE ABSOLUTE PATH!
 import os
@@ -326,8 +332,12 @@ DASHBOARD_DIR = os.path.join(basedir, 'dashboard')
 
 @app.route('/dashboard')
 def serve_dashboard():
-    """Serve the main dashboard page"""
-    return send_from_directory(DASHBOARD_DIR, 'index.html', max_age=0)
+    """Serve the dashboard page with the API key injected from .env so it
+    never has to be hardcoded in the client bundle."""
+    with open(os.path.join(DASHBOARD_DIR, 'index.html'), encoding='utf-8') as f:
+        html = f.read()
+    html = html.replace('__NIDS_API_KEY__', CONFIG.get('API_KEY', ''))
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 @app.route('/dashboard/<path:filename>')
 def serve_dashboard_assets(filename):

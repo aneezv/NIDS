@@ -20,8 +20,8 @@ echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf > /dev/null
 # --- 2. Start the Sensor ---
 echo "👀 Starting Python Sensor..."
 # Check if model exists
-if [ ! -f "model.pkl" ]; then
-    echo "❌ ERROR: 'model.pkl' not found. Please run 'sudo python3 train.py' first!"
+if [ ! -f "model_advanced.pkl" ]; then
+    echo "❌ ERROR: 'model_advanced.pkl' not found. Please run 'python3 train.py' first!"
     exit 1
 fi
 
