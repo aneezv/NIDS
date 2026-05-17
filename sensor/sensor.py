@@ -51,6 +51,7 @@ CERT_PATH = data.get("cert_path", "cert.pem") # Path to the certificate copied f
 ALERT_CONF_THRESHOLD = float(data.get("alert_confidence_threshold", 20))
 ALERT_RATE_LIMIT_SECONDS = float(data.get("alert_rate_limit_seconds", 8.5))
 FLOW_STATE_MAX_ENTRIES = int(data.get("flow_state_max_entries", 10000))
+FLOW_WINDOW_SECONDS = float(data.get("flow_window_seconds", 5.0))
 
 # --- INITIALIZATION ---
 detector = AnomalyDetector(
@@ -242,23 +243,27 @@ def monitor_traffic():
         batch_ips = []
         
         # [NEW] Micro-Flow State Tracker
-        flow_state = {} # ip -> {'first_seen': float, 'pkts': int, 'bytes': int}
-        WINDOW_SIZE = 2.0
-        
+        # state: {first_seen, pkts, bytes, ports}
+        #   ports is a set of distinct destination ports seen from this source
+        #   within the current window. len(ports) becomes the 7th feature and
+        #   is the primary discriminator for port-scanning activity — a normal
+        #   client hits 1-3 ports per window; a scan hits dozens to hundreds.
+        flow_state = {}
+
         for line in process.stdout:
             src_ip, features = parse_tshark_line(line)
-            
+
             if not features:
                 continue
 
             # Whitelist Self/Router to avoid feedback loops
-            if src_ip in WHITELIST: 
+            if src_ip in WHITELIST:
                 continue
-                
+
             now = time.time()
             frame_len = features[0]
-            
-            # [NEW] Flow logic update
+            dst_port = features[1]
+
             if src_ip not in flow_state:
                 # Bound memory: if the table grew past the configured cap,
                 # evict the oldest 10% of entries by first_seen.
@@ -267,29 +272,31 @@ def monitor_traffic():
                     oldest = sorted(flow_state.items(), key=lambda kv: kv[1]['first_seen'])[:evict_count]
                     for k, _ in oldest:
                         flow_state.pop(k, None)
-                flow_state[src_ip] = {'first_seen': now, 'pkts': 0, 'bytes': 0}
-                
+                flow_state[src_ip] = {'first_seen': now, 'pkts': 0, 'bytes': 0, 'ports': set()}
+
             state = flow_state[src_ip]
             state['pkts'] += 1
             state['bytes'] += frame_len
-            
+            state['ports'].add(dst_port)
+
             elapsed = now - state['first_seen']
-            
+
             # Calculate rates. Force a minimum of 1.0s elapsed to prevent initial microsecond spikes.
             effective_elapsed = max(elapsed, 1.0)
             packet_rate = state['pkts'] / effective_elapsed
             byte_rate = state['bytes'] / effective_elapsed
-            
-            # Reset window every 2 seconds
-            if elapsed >= WINDOW_SIZE:
+            distinct_ports = len(state['ports'])
+
+            # Window reset
+            if elapsed >= FLOW_WINDOW_SECONDS:
                 state['first_seen'] = now
                 state['pkts'] = 0
                 state['bytes'] = 0
-                
-            # Append new flow features to packet features
-            # Old features: [frame_len, port, proto, flags]
-            # New features: [frame_len, port, proto, flags, packet_rate, byte_rate]
-            features.extend([packet_rate, byte_rate])
+                state['ports'] = set()
+
+            # Extended feature vector matches detector.feature_cols:
+            # [frame_len, port, proto, flags, packet_rate, byte_rate, distinct_ports]
+            features.extend([packet_rate, byte_rate, distinct_ports])
 
             batch_data.append(features)
             batch_ips.append(src_ip)

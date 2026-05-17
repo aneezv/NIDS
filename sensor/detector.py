@@ -8,7 +8,7 @@ class AnomalyDetector:
         print(f"[detector] Loading model from {model_path} (threshold: {threshold})...")
         self.model = joblib.load(model_path)
         self.model_path = model_path
-        self.feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate']
+        self.feature_cols = ['frame_len', 'port', 'proto', 'flags', 'packet_rate', 'byte_rate', 'distinct_ports']
         self.threshold = threshold
 
     def normalize_score(self, anomaly_score):
@@ -51,7 +51,8 @@ class AnomalyDetector:
 
     def predict_batch(self, batch_features):
         """
-        batch_features: List of lists [frame_len, port, proto, flags]
+        batch_features: List of lists matching self.feature_cols (7 features):
+            [frame_len, port, proto, flags, packet_rate, byte_rate, distinct_ports]
         Returns: List of (raw_score, normalized_confidence)
         """
         if not batch_features:
